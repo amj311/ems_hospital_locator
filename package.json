@@ -12,7 +12,7 @@
     "build-only": "vite build",
     "type-check": "vue-tsc --noEmit -p tsconfig.vitest.json --composite false",
 	"db:push:both": "yarn db:generate && docker exec talaria-server-dev yarn db:push",
-	"db:push:both:force": "yarn db:generate && docker exec talaria-server-dev yarn db:push --force-reset",
+	"db:push:both:accept": "yarn db:generate && docker exec talaria-server-dev yarn db:push --accept-data-loss",
     "db:push": "cd prisma && npx prisma db push",
     "db:generate": "cd prisma && npx prisma generate",
     "local-prod": "docker compose -f docker-compose-prod-local.yml up -d --build --force-recreate > /dev/null"
