@@ -22,7 +22,7 @@ export default (app, _, done) => {
 
 	app.post('/', async function handler(request, reply) {
 		const facilityData = request.body as Facility;
-		const data = await FacilityService.createFacility(facilityData);
+		const data = await FacilityService.upsertFacility(facilityData);
 		return {
 			success: true,
 			data,

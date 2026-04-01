@@ -2,6 +2,10 @@ import type { Facility } from "core/models/Facility";
 import { FacilityDao } from "../data/FacilityDao";
 
 export const FacilityService = {
+	async upsertFacility(data: Facility) {
+		return await FacilityDao.upsertFacility(data);
+	},
+
 	async createFacility(data: Facility) {
 		return await FacilityDao.createFacility(data);
 	},

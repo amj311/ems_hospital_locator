@@ -11,8 +11,8 @@
     "test:unit": "vitest",
     "build-only": "vite build",
     "type-check": "vue-tsc --noEmit -p tsconfig.vitest.json --composite false",
-	"db:push:both": "yarn db:generate && docker exec talaria-server-dev yarn db:push",
-	"db:push:both:accept": "yarn db:generate && docker exec talaria-server-dev yarn db:push --accept-data-loss",
+    "db:push:both": "yarn db:generate && docker exec talaria-server-dev yarn db:push && docker exec talaria-server-dev yarn db:generate",
+    "db:push:both:accept": "yarn db:generate && docker exec talaria-server-dev yarn db:push --accept-data-loss && docker exec talaria-server-dev yarn db:generate",
     "db:push": "cd prisma && npx prisma db push",
     "db:generate": "cd prisma && npx prisma generate",
     "local-prod": "docker compose -f docker-compose-prod-local.yml up -d --build --force-recreate > /dev/null"
@@ -20,6 +20,7 @@
   "dependencies": {
     "@fastify/cors": "^11.0.1",
     "@fastify/static": "^8.2.0",
+    "@primevue/forms": "^4.5.4",
     "@prisma/client": "^5.2.0",
     "@types/uuid": "^9.0.3",
     "axios": "^1.5.0",

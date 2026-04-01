@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import Drawer from 'primevue/drawer';
-import type { Transaction } from 'core/models/Transaction';
 import NavTrigger from './NavTrigger.vue';
 import Button from 'primevue/button';
 
 const props = defineProps<{
 	triggerKey: string;
-	onClose?: (transaction: Transaction) => void;
+	onClose?: () => void;
 	title?: string;
 	width?: number;
 }>();
@@ -29,10 +28,12 @@ defineExpose({
 		:onClose="props.onClose"
 	>
 		<template #default="{ show }">
-			<Drawer :visible="show" position="right" :header="title" :class="`w-full sm:w-${smallWidth}rem`">
+			<Drawer :visible="show" position="right" :class="`w-full sm:w-${smallWidth}rem`">
 				<template #closebutton>
 					<Button icon="pi pi-times" size="small" text @click="drawerTrigger?.close" severity="secondary" />
 				</template>
+
+				<template #header v-if="$slots.title"><h2><slot name="title" /></h2></template>
 
 				<template v-for="(slotFn, name) in $slots" #[name]="slotProps">
 					<slot :name="name" v-bind="slotProps" />

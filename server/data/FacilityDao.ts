@@ -2,6 +2,13 @@ import type { Facility } from "core/models/Facility";
 import { prisma } from "../../prisma/client";
 
 export const FacilityDao = {
+	async upsertFacility(data: Facility) {
+		if (data.facility_id) {
+			return await this.updateFacility(data.facility_id, data);
+		}
+		return await this.createFacility(data);
+	},
+
 	async createFacility(data: Facility) {
 		const { Designations, Services, ...scalarData } = data;
 		return await prisma.facility.create({
@@ -14,6 +21,7 @@ export const FacilityDao = {
 					Services: { createMany: { data: Services.map(({ type }) => ({ type })) } },
 				}),
 			},
+			include: { Designations: true, Services: true },
 		});
 	},
 
@@ -70,6 +78,7 @@ export const FacilityDao = {
 					},
 				}),
 			},
+			include: { Designations: true, Services: true },
 		});
 	},
 

@@ -8,10 +8,10 @@ import LoggedIn from './views/LoggedIn.vue';
 import PromptModal from './components/utils/PromptModal.vue';
 import Toast from 'primevue/toast';
 import Button from 'primevue/button';
-import { useAppStore } from './stores/app.store';
 import Snackbar from './components/utils/Toast.vue';
 import Message from 'primevue/message';
 import MapView from './views/MapView.vue';
+import { useDeviceStore } from './stores/device.store';
 
 const userStore = useUserStore();
 const sessionInterval = setInterval(userStore.loadSessionData, 60000);
@@ -31,7 +31,7 @@ onBeforeUnmount(() => {
 	<!-- Message styles used for Toast are not bundled unless the component is used somewhere -->
 	<Message severity="info" style="display: none;" />
 
-	<div class="app h-full" :class="{ touch: useAppStore().isTouch }">
+	<div class="app h-full" :class="{ touch: useDeviceStore().isTouch }">
 		<LoggedIn v-if="!waitingForAuth && userStore.hasAuth && userStore.currentUser" />
 		<div v-else class="flex flex-column align-items-center" style="padding-top: calc(33vh - 5rem)">
 			<img src="./assets/caduceus-vistaprint.png" alt="Talaria Logo" class="mb-4" style="width: 20em" />

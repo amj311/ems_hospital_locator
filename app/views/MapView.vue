@@ -3,7 +3,8 @@
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { onMounted, onBeforeUnmount, ref, watch, computed, nextTick } from 'vue';
-import AddFacilityModal from '@/components/AddFacilityModal.vue';
+import UpsertFacilityModal from '@/components/UpsertFacilityModal.vue';
+import NavTriggerDrawer from '@/components/utils/NavTrigger/NavTriggerDrawer.vue';
 import type { Facility } from 'core/models/Facility';
 import { KNOWN_DESIGNATIONS } from 'core/models/Designation';
 import { KNOWN_SERVICES, SERVICE_CATEGORIES } from 'core/models/Service';
@@ -12,6 +13,7 @@ import Select from 'primevue/select';
 import MultiSelect from 'primevue/multiselect';
 import { distanceInMeters } from 'core/utils/geoUtils';
 import request from '@/services/request';
+import Button from 'primevue/button';
 
 const props = withDefaults(defineProps<{
     followUser?: boolean;
@@ -26,9 +28,10 @@ const userPosition = ref<{ lat: number; lon: number } | null>(null);
 const lastComputedPosition = ref<{ lat: number; lon: number } | null>(null);
 const pinDistances = ref<Map<string, number>>(new Map());
 const pinTimes = ref<Map<string, number>>(new Map());
-const selectedFacility = ref<Facility | null>(null);
-const selectedDesignation = ref<string | null>(null);
-const selectedService = ref<string[]>([]);
+const selectedFacilityId = ref<string | null>(null);
+const selectedFacility = computed(() => facilities.value.find(f => f.facility_id === selectedFacilityId.value) ?? null);
+const designationFilter = ref<string | null>(null);
+const serviceFilters = ref<string[]>([]);
 
 const sortedFacilities = computed(() => {
     return [...facilities.value].sort((a, b) => {
@@ -96,11 +99,11 @@ const serviceOptions = computed(() => {
 
 const filteredFacilities = computed(() => {
     return sortedFacilities.value.filter(f => {
-        const matchesDesignation = !selectedDesignation.value ||
-            f.Designations?.some(d => d.type === selectedDesignation.value);
-        const matchesService = !selectedService.value.length ||
-            f.Services?.some(s => selectedService.value.includes(s.type));
-        return matchesDesignation && matchesService;
+        const matchesDesignation = !designationFilter.value ||
+            f.Designations?.some(d => d.type === designationFilter.value);
+        const matchesServices = !serviceFilters.value.length ||
+            serviceFilters.value?.every(service => f.Services?.some(s => s.type === service));
+        return matchesDesignation && matchesServices;
     });
 });
 
@@ -109,11 +112,18 @@ const designationOptions = computed(() =>
 );
 
 const cardEls = new Map<string, HTMLElement>();
+const cardScrollEl = ref<HTMLElement | null>(null);
 
 function setCardEl(id: string, el: any) {
     if (el) cardEls.set(id, el as HTMLElement);
     else cardEls.delete(id);
 }
+
+watch(filteredFacilities, () => {
+    nextTick(() => {
+        if (cardScrollEl.value && !selectedFacility.value) cardScrollEl.value.scrollLeft = 0;
+    });
+});
 
 watch(selectedFacility, (facility, prevFacility) => {
     if (prevFacility) {
@@ -196,7 +206,13 @@ let watchId: number | null = null;
 const newPin = ref<L.LatLng | null>(null);
 let droppedPin: L.Marker | null = null;
 
-const addFacilityModal = ref<InstanceType<typeof AddFacilityModal> | null>(null);
+const upsertFacilityModal = ref<InstanceType<typeof UpsertFacilityModal> | null>(null);
+const detailDrawer = ref<InstanceType<typeof NavTriggerDrawer> | null>(null);
+
+function openFacilityDetail(facility: Facility) {
+    selectedFacilityId.value = facility.facility_id!;
+    detailDrawer.value?.trigger()?.open();
+}
 
 // Fix Leaflet's broken default icon paths when bundled with Vite
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -222,12 +238,55 @@ onMounted(() => {
     renderPins();
     startWatchingUser();
 
-    map.on('click', (e: L.LeafletMouseEvent) => {
-        selectedFacility.value = null;
-        if (droppedPin) droppedPin.remove();
-        newPin.value = e.latlng;
-        droppedPin = L.marker(e.latlng).addTo(map!);
+    const LONG_PRESS_MS = 500;
+    let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+    let longPressLatLng: L.LatLng | null = null;
+    let longPressMoved = false;
+
+    function cancelLongPress() {
+        if (longPressTimer !== null) {
+            clearTimeout(longPressTimer);
+            longPressTimer = null;
+        }
+    }
+
+    function startLongPress(latlng: L.LatLng) {
+        longPressMoved = false;
+        longPressLatLng = latlng;
+        cancelLongPress();
+        longPressTimer = setTimeout(() => {
+            if (!longPressMoved && longPressLatLng) {
+                selectedFacilityId.value = null;
+                if (droppedPin) droppedPin.remove();
+                newPin.value = longPressLatLng;
+                droppedPin = L.marker(longPressLatLng).addTo(map!);
+            }
+            longPressTimer = null;
+        }, LONG_PRESS_MS);
+    }
+
+    map.on('mousedown', (e: L.LeafletMouseEvent) => startLongPress(e.latlng));
+
+    map.on('mousemove', () => {
+        longPressMoved = true;
+        cancelLongPress();
     });
+
+    map.on('mouseup', cancelLongPress);
+
+    // Touch support
+    mapEl.value.addEventListener('touchstart', (e: TouchEvent) => {
+        const touch = e.touches[0];
+        const containerPoint = map!.mouseEventToContainerPoint(touch as unknown as MouseEvent);
+        startLongPress(map!.containerPointToLatLng(containerPoint));
+    }, { passive: true });
+
+    mapEl.value.addEventListener('touchmove', () => {
+        longPressMoved = true;
+        cancelLongPress();
+    }, { passive: true });
+
+    mapEl.value.addEventListener('touchend', cancelLongPress, { passive: true });
 
     const RecenterControl = L.Control.extend({
         onAdd() {
@@ -255,7 +314,7 @@ onBeforeUnmount(() => {
     map?.remove();
 });
 
-watch([facilities, pinDistances, pinTimes, selectedDesignation, selectedService], renderPins, { deep: true });
+watch([facilities, pinDistances, pinTimes, designationFilter, serviceFilters], renderPins, { deep: true });
 
 function renderPins() {
     if (!map) return;
@@ -263,11 +322,12 @@ function renderPins() {
     pinMarkers = new Map();
 
     const filteredIds = new Set(filteredFacilities.value.map(f => f.facility_id!));
-    const hasActiveFilter = selectedDesignation.value !== null || selectedService.value.length > 0;
+    const hasActiveFilter = designationFilter.value !== null || serviceFilters.value.length > 0;
 
     for (const pin of facilities.value) {
         const timeSeconds = pinTimes.value.get(pin.facility_id!);
         const timeLabel = timeSeconds !== undefined ? formatTime(timeSeconds) : '';
+		const isSelected = selectedFacility.value?.facility_id === pin.facility_id;
         const isSubdued = hasActiveFilter && !filteredIds.has(pin.facility_id!);
         const icon = L.divIcon({
             className: '',
@@ -283,16 +343,16 @@ function renderPins() {
             iconAnchor: [12, 12],
             popupAnchor: [0, -14],
         });
-        const marker = L.marker([pin.lat, pin.lon], { icon });
+        const marker = L.marker([pin.lat, pin.lon], { icon, zIndexOffset: isSubdued ? -100 : 0 });
         marker.on('click', () => {
 			if (!isSubdued) {
-				selectedFacility.value = pin;
+				selectedFacilityId.value = pin.facility_id!;
 				clearNewPin();
 			}
         });
         marker.addTo(map);
         pinMarkers.set(pin.facility_id!, marker);
-        if (selectedFacility.value?.facility_id === pin.facility_id) {
+        if (isSelected) {
             nextTick(() => {
                 marker.getElement()?.classList.add('facility-pin--selected');
                 marker.setZIndexOffset(1000);
@@ -341,13 +401,22 @@ function clearNewPin() {
 
 function createFacility() {
     if (!newPin.value) return;
-    addFacilityModal.value?.open(newPin.value.lat, newPin.value.lng);
+    upsertFacilityModal.value?.open({ lat: newPin.value.lat, lon: newPin.value.lng });
+}
+
+function editFacility(facility: Facility) {
+    upsertFacilityModal.value?.open(facility);
 }
 
 async function onFacilitySaved(facility: Facility) {
     const res = await request.post('/facility', facility);
-    facilities.value.push(res.data.data);
-    clearNewPin();
+    if (facility.facility_id) {
+        const idx = facilities.value.findIndex(f => f.facility_id === facility.facility_id);
+        if (idx !== -1) facilities.value[idx] = res.data.data;
+    } else {
+        facilities.value.push(res.data.data);
+        clearNewPin();
+    }
 }
 
 function designationLabel(d: { type: string; level?: number | null }): string {
@@ -412,10 +481,10 @@ function startWatchingUser() {
         </div>
         <Transition name="card-tray">
             <div v-if="!newPin && sortedFacilities.length" class="facility-card-tray p-3 flex flex-column gap-1">
-				<div class="flex gap-2">
+				<div class="flex gap-2 flex-wrap">
 					<Select
 						v-if="availableDesignations.length" 
-						v-model="selectedDesignation"
+						v-model="designationFilter"
 						:options="designationOptions"
 						option-label="label"
 						option-value="value"
@@ -425,7 +494,7 @@ function startWatchingUser() {
 					/>
 					<MultiSelect
 						v-if="availableServices.length"
-						v-model="selectedService"
+						v-model="serviceFilters"
 						:options="serviceOptions"
 						option-label="label"
 						option-value="value"
@@ -436,15 +505,24 @@ function startWatchingUser() {
 						style="max-width: 220px"
 						data-testid="service-filter-select"
 					/>
+					<Button
+						v-if="designationFilter || serviceFilters.length"
+						class="clear-filters-btn"
+						@click="() => { designationFilter = null; serviceFilters = []; }"
+						data-testid="clear-filters-btn"
+						icon="pi pi-times"
+						label="Clear"
+						text
+					/>
 				</div>
-                <div class="facility-card-scroll flex gap-2">
+                <div ref="cardScrollEl" class="facility-card-scroll flex gap-2">
                     <div
                         v-for="facility in filteredFacilities"
                         :key="facility.facility_id"
                         :ref="(el: any) => setCardEl(facility.facility_id!, el)"
                         class="facility-card-item flex flex-column"
-                        :class="{ 'facility-card-item--selected': selectedFacility?.facility_id === facility.facility_id }"
-                        @click="selectedFacility = facility"
+                        :class="{ 'facility-card-item--selected': selectedFacilityId === facility.facility_id }"
+                        @click="selectedFacilityId = facility.facility_id!"
                     >
                         <div class="facility-card-item-name">{{ facility.name }}</div>
                         <div v-if="facility.Designations?.length" class="facility-card-item-designations">
@@ -477,16 +555,106 @@ function startWatchingUser() {
                                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
                                 Directions
                             </a>
+                            <button
+                                data-testid="facility-details-btn"
+                                class="facility-card-btn facility-card-btn--details"
+                                @click.stop="openFacilityDetail(facility)"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                                Details
+                            </button>
                         </div>
                     </div>
                 </div>
             </div>
         </Transition>
     </div>
-    <AddFacilityModal ref="addFacilityModal" @save="onFacilitySaved" />
+    <UpsertFacilityModal ref="upsertFacilityModal" @save="onFacilitySaved" />
+    <NavTriggerDrawer
+        ref="detailDrawer"
+        trigger-key="facility-detail"
+        :width="28"
+    >
+		<template #title>{{ selectedFacility?.name }}</template>
+        <template v-if="selectedFacility">
+            <div class="facility-detail">
+                <div v-if="selectedFacility.Designations?.length" class="facility-detail-section">
+                    <div class="facility-detail-section-label">Designations</div>
+                    <div class="facility-detail-tags">
+                        <Tag
+                            v-for="d in selectedFacility.Designations"
+                            :key="d.facility_designation_id ?? d.type"
+                            :value="designationLabel(d)"
+                            severity="warn"
+                        />
+                    </div>
+                </div>
+
+                <div v-if="selectedFacility.address_1" class="facility-detail-section">
+                    <div class="facility-detail-section-label">Address</div>
+                    <div class="facility-detail-text">
+                        {{ selectedFacility.address_1 }}
+                        <span v-if="selectedFacility.address_2">, {{ selectedFacility.address_2 }}</span>
+                        <br v-if="selectedFacility.city || selectedFacility.state" />
+                        <span v-if="selectedFacility.city">{{ selectedFacility.city }}</span><span v-if="selectedFacility.city && selectedFacility.state">, </span><span v-if="selectedFacility.state">{{ selectedFacility.state }}</span>
+                    </div>
+                </div>
+
+                <div v-if="selectedFacility.phone" class="facility-detail-section">
+                    <div class="facility-detail-section-label">Phone</div>
+                    <a :href="'tel:' + selectedFacility.phone" class="facility-detail-phone">{{ selectedFacility.phone }}</a>
+                </div>
+
+                <div v-if="pinTimes.get(selectedFacility.facility_id!)" class="facility-detail-section">
+                    <div class="facility-detail-section-label">Drive Time</div>
+                    <div class="facility-detail-text">🕐 {{ formatTime(pinTimes.get(selectedFacility.facility_id!)!) }}</div>
+                </div>
+
+                <div v-if="selectedFacility.Services?.length" class="facility-detail-section">
+                    <div class="facility-detail-section-label">Services</div>
+                    <ul class="facility-detail-services">
+                        <li
+                            v-for="s in selectedFacility.Services"
+                            :key="s.facility_service_id ?? s.type"
+                        >
+                            {{ KNOWN_SERVICES[s.type]?.displayName ?? s.type }}
+                        </li>
+                    </ul>
+                </div>
+
+                <div class="facility-detail-actions">
+                    <button
+                        data-testid="facility-edit-btn"
+                        class="facility-card-btn facility-card-btn--details"
+                        @click="editFacility(selectedFacility)"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                        Edit
+                    </button>
+                    <a
+                        v-if="selectedFacility.phone"
+                        :href="'tel:' + selectedFacility.phone"
+                        class="facility-card-btn facility-card-btn--call"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.68 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.59 1.17h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.73a16 16 0 0 0 6.29 6.29l1.13-.92a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                        Call
+                    </a>
+                    <a
+                        :href="getDirectionsUrl(selectedFacility)"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="facility-card-btn facility-card-btn--directions"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
+                        Directions
+                    </a>
+                </div>
+            </div>
+        </template>
+    </NavTriggerDrawer>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 .map-wrapper {
     position: relative;
     width: 100%;
@@ -596,17 +764,20 @@ function startWatchingUser() {
 
 .facility-card-item {
     flex: 0 0 auto;
-    min-width: 160px;
-	max-width: 80vw;
+	width: 80vw;
+    max-width: 25rem;
     scroll-snap-align: center;
     background: white;
     border-radius: 12px;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.18);
     padding: 0.75rem 0.875rem;
     cursor: pointer;
     border: 2px solid transparent;
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
+// body.touch .facility-card-item {
+// 	width: 80vw;
+// }
 
 .facility-card-item--selected {
     border-color: #1a73e8;
@@ -628,6 +799,7 @@ function startWatchingUser() {
     flex-wrap: wrap;
     gap: 0.25rem;
     margin-bottom: 0.3rem;
+	--p-tag-font-size: .7rem;
 }
 
 
@@ -674,6 +846,72 @@ function startWatchingUser() {
 
 .facility-card-btn--directions:hover {
     background: #bbdefb;
+}
+
+.facility-card-btn--details {
+    background: #f3e5f5;
+    color: #6a1b9a;
+}
+
+.facility-card-btn--details:hover {
+    background: #e1bee7;
+}
+
+.facility-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    padding: 0.25rem 0;
+}
+
+.facility-detail-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.facility-detail-section-label {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #888;
+}
+
+.facility-detail-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.facility-detail-text {
+    font-size: 0.9rem;
+    color: #222;
+    line-height: 1.5;
+}
+
+.facility-detail-phone {
+    font-size: 0.9rem;
+    color: #1a73e8;
+    text-decoration: none;
+}
+
+.facility-detail-phone:hover {
+    text-decoration: underline;
+}
+
+.facility-detail-services {
+    margin: 0;
+    padding-left: 1.25rem;
+    font-size: 0.875rem;
+    color: #333;
+    line-height: 1.7;
+}
+
+.facility-detail-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
 }
 
 .card-tray-enter-active,
