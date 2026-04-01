@@ -1,0 +1,18 @@
+body {
+	--p-accordion-header-padding: 0.5rem;
+}
+
+.p-inputnumber-input {
+    max-width: 100%;
+    text-align: inherit;
+}
+
+.input-button {
+	border-color: var(--p-select-border-color) !important;
+	box-shadow: var(--p-select-shadow);
+}
+
+.pi {
+	font-size: inherit !important;
+    vertical-align: text-bottom;
+}

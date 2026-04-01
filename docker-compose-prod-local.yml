@@ -1,0 +1,61 @@
+services:
+  server:
+    build:
+      context: .
+      dockerfile: ./Dockerfile.server.prod
+    image: talaria-server
+    pull_policy: never
+    labels:
+      - "com.docker.compose.project=talaria-web"
+    container_name: talaria-server
+    restart: on-failure:max=2
+    ports:
+      - 3021:5000
+    depends_on:
+      - db
+    links:
+      - db
+
+  db:
+    image: talaria-db:latest
+    pull_policy: never
+    container_name: talaria-db
+    restart: on-failure:max=2
+    build:
+      context: .
+      dockerfile: ./Dockerfile.db
+    labels:
+      - "com.docker.compose.project=talaria-web"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=talaria
+    ports:
+      - 3022:5432
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+  backup:
+    image: talaria-backup:latest
+    pull_policy: never
+    container_name: talaria-backup
+    restart: on-failure:max=2
+    build:
+      context: .
+      dockerfile: ./Dockerfile.backup
+    labels:
+      - "com.docker.compose.project=talaria-web"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=talaria
+    volumes:
+      - /Users/Arthur/code/talaria-web/backups:/backup-dir
+    depends_on:
+      - db
+    links:
+      - db
+
+volumes:
+  db-data:
+    name: talaria-data

@@ -1,0 +1,63 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+    provider = "prisma-client-js"
+}
+
+datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+}
+
+model Facility {
+    facility_id String   @id @default(uuid())
+    created_at  DateTime @default(now())
+    updated_at  DateTime @default(now()) @updatedAt
+
+    name      String
+    phone     String?
+    address_1 String?
+    address_2 String?
+    city      String?
+    state     String?
+    lat       Float
+    lon       Float
+
+    Designations FacilityDesignation[]
+    Services     FacilityService[]
+}
+
+model FacilityService {
+    facility_service_id String   @id @default(uuid())
+    created_at          DateTime @default(now())
+    updated_at          DateTime @default(now()) @updatedAt
+
+    type String
+
+    facility    Facility @relation(fields: [facility_id], references: [facility_id])
+    facility_id String
+}
+
+model FacilityDesignation {
+    facility_designation_id String   @id @default(uuid())
+    created_at              DateTime @default(now())
+    updated_at              DateTime @default(now()) @updatedAt
+
+    type     String
+    level    Int?
+
+    facility    Facility @relation(fields: [facility_id], references: [facility_id])
+    facility_id String
+}
+
+model User {
+    user_id    String   @id @default(uuid())
+    created_at DateTime @default(now())
+    updated_at DateTime @default(now()) @updatedAt
+
+    auth_id            String              @unique
+    email              String              @unique
+    given_name         String
+    family_name        String
+}
