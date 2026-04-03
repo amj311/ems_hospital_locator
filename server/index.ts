@@ -1,6 +1,9 @@
 import 'dotenv/config';
 
 import Fastify from "fastify";
+interface RequestWithSessionUser {
+	sessionUser: any;
+}
 import path from "path";
 import { createReadStream, readFileSync } from "fs";
 import sessionAuthMiddleware, { firebaseConfig } from "./services/SessionService";
@@ -55,6 +58,39 @@ app.register((api, _, done) => {
 
 	done();
 }, { prefix: '/api' });
+
+// admin routes
+app.register((api, _, done) => {
+	// First check if user has admin privilege - run after session auth
+	api.addHook('preValidation', sessionAuthMiddleware);
+	
+	api.addHook('preValidation', (request: any, reply, done) => {
+		const user = request.sessionUser;
+		if (!user) {
+			reply.status(403).send({ message: 'Authentication required' });
+			done();
+			return;
+		}
+		if (!user.isAdmin) {
+			reply.status(403).send({ message: 'Access denied: Admin privileges required' });
+			done();
+			return;
+		}
+		done();
+	});
+
+	api.get('/', (request, reply) => {
+		return {
+			success: true,
+			message: 'Admin API',
+			data: {}
+		}
+	});
+
+	api.register(require('./routes/facility.admin.route'), { prefix: '/facility' });
+
+	done();
+}, { prefix: '/api/admin' });
 
 // Serving the static app in PROD
 app.register(require('@fastify/static'), {
