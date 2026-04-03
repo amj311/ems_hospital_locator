@@ -60,4 +60,5 @@ model User {
     email              String              @unique
     given_name         String
     family_name        String
+    isAdmin            Boolean            @default(false)
 }

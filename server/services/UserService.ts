@@ -1,12 +1,5 @@
 import { prisma } from "../../prisma/client";
-
-export type User = {
-	auth_id: string;
-	user_id: string;
-	given_name: string;
-	family_name: string;
-	email: string;
-}
+import type { User } from "../../core/models/User";
 
 export const UserService = {
 	async getUserByAuthId(authId: string) {
