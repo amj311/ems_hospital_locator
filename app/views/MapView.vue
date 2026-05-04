@@ -4,6 +4,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { onMounted, onBeforeUnmount, ref, watch, computed, nextTick } from 'vue';
 import UpsertFacilityModal from '@/components/UpsertFacilityModal.vue';
+import SettingsDrawerModal from '@/components/utils/SettingsDrawerModal.vue';
 import NavTriggerDrawer from '@/components/utils/NavTrigger/NavTriggerDrawer.vue';
 import type { Facility } from 'core/models/Facility';
 import { KNOWN_DESIGNATIONS } from 'core/models/Designation';
@@ -12,14 +13,23 @@ import Tag from 'primevue/tag';
 import Select from 'primevue/select';
 import MultiSelect from 'primevue/multiselect';
 import { distanceInMeters } from 'core/utils/geoUtils';
+import { buildDirectionsUrl } from 'core/utils/directionsUtils';
 import request from '@/services/request';
 import Button from 'primevue/button';
+import { useUserStore } from '@/stores/user.store';
+import { useSettingsStore } from '@/stores/settings.store';
+import { useDeviceStore } from '@/stores/device.store';
 
 const props = withDefaults(defineProps<{
     followUser?: boolean;
 }>(), {
     followUser: true,
 });
+
+const userStore = useUserStore();
+const settingsStore = useSettingsStore();
+const deviceStore = useDeviceStore();
+const isAdmin = computed(() => userStore.currentUser?.isAdmin ?? false);
 
 const OSRM_UPDATE_THRESHOLD_METERS = 200;
 
@@ -147,9 +157,12 @@ function facilityTime(facility: Facility): string | null {
 }
 
 function getDirectionsUrl(facility: Facility): string {
-    const dest = `${facility.lat},${facility.lon}`;
-    const origin = userPosition.value ? `${userPosition.value.lat},${userPosition.value.lon}` : '';
-    return `https://www.google.com/maps/dir/${origin}/${dest}`;
+    return buildDirectionsUrl(
+        settingsStore.localSettings.mapsProvider,
+        userPosition.value,
+        { lat: facility.lat, lon: facility.lon },
+        deviceStore.platform
+    );
 }
 
 // Straight-line distances (kept for efficiency/sorting use)
@@ -204,10 +217,12 @@ let pinMarkers = new Map<string, L.Marker>();
 let watchId: number | null = null;
 
 const newPin = ref<L.LatLng | null>(null);
+const isAddFacilityMode = ref(false);
 let droppedPin: L.Marker | null = null;
 
 const upsertFacilityModal = ref<InstanceType<typeof UpsertFacilityModal> | null>(null);
 const detailDrawer = ref<InstanceType<typeof NavTriggerDrawer> | null>(null);
+const settingsModal = ref<InstanceType<typeof SettingsDrawerModal> | null>(null);
 
 function openFacilityDetail(facility: Facility) {
     selectedFacilityId.value = facility.facility_id!;
@@ -238,55 +253,10 @@ onMounted(() => {
     renderPins();
     startWatchingUser();
 
-    const LONG_PRESS_MS = 500;
-    let longPressTimer: ReturnType<typeof setTimeout> | null = null;
-    let longPressLatLng: L.LatLng | null = null;
-    let longPressMoved = false;
-
-    function cancelLongPress() {
-        if (longPressTimer !== null) {
-            clearTimeout(longPressTimer);
-            longPressTimer = null;
-        }
-    }
-
-    function startLongPress(latlng: L.LatLng) {
-        longPressMoved = false;
-        longPressLatLng = latlng;
-        cancelLongPress();
-        longPressTimer = setTimeout(() => {
-            if (!longPressMoved && longPressLatLng) {
-                selectedFacilityId.value = null;
-                if (droppedPin) droppedPin.remove();
-                newPin.value = longPressLatLng;
-                droppedPin = L.marker(longPressLatLng).addTo(map!);
-            }
-            longPressTimer = null;
-        }, LONG_PRESS_MS);
-    }
-
-    map.on('mousedown', (e: L.LeafletMouseEvent) => startLongPress(e.latlng));
-
-    map.on('mousemove', () => {
-        longPressMoved = true;
-        cancelLongPress();
+    map.on('click', (e: L.LeafletMouseEvent) => {
+        if (!isAddFacilityMode.value && !newPin.value) return;
+        placeNewFacilityPin(e.latlng);
     });
-
-    map.on('mouseup', cancelLongPress);
-
-    // Touch support
-    mapEl.value.addEventListener('touchstart', (e: TouchEvent) => {
-        const touch = e.touches[0];
-        const containerPoint = map!.mouseEventToContainerPoint(touch as unknown as MouseEvent);
-        startLongPress(map!.containerPointToLatLng(containerPoint));
-    }, { passive: true });
-
-    mapEl.value.addEventListener('touchmove', () => {
-        longPressMoved = true;
-        cancelLongPress();
-    }, { passive: true });
-
-    mapEl.value.addEventListener('touchend', cancelLongPress, { passive: true });
 
     const RecenterControl = L.Control.extend({
         onAdd() {
@@ -328,7 +298,7 @@ function renderPins() {
         const timeSeconds = pinTimes.value.get(pin.facility_id!);
         const timeLabel = timeSeconds !== undefined ? formatTime(timeSeconds) : '';
 		const isSelected = selectedFacility.value?.facility_id === pin.facility_id;
-        const isSubdued = hasActiveFilter && !filteredIds.has(pin.facility_id!);
+        const isSubdued = isAddFacilityMode.value || (hasActiveFilter && !filteredIds.has(pin.facility_id!));
         const icon = L.divIcon({
             className: '',
             html: /* html */`
@@ -345,6 +315,7 @@ function renderPins() {
         });
         const marker = L.marker([pin.lat, pin.lon], { icon, zIndexOffset: isSubdued ? -100 : 0 });
         marker.on('click', () => {
+            if (isAddFacilityMode.value) return;
 			if (!isSubdued) {
 				selectedFacilityId.value = pin.facility_id!;
 				clearNewPin();
@@ -399,6 +370,25 @@ function clearNewPin() {
     newPin.value = null;
 }
 
+function startAddFacilityMode() {
+    isAddFacilityMode.value = true;
+    selectedFacilityId.value = null;
+	renderPins();
+}
+
+function cancelAddFacilityMode() {
+    isAddFacilityMode.value = false;
+    clearNewPin();
+	renderPins();
+}
+
+function placeNewFacilityPin(latlng: L.LatLng) {
+    selectedFacilityId.value = null;
+    if (droppedPin) droppedPin.remove();
+    newPin.value = latlng;
+    droppedPin = L.marker(latlng).addTo(map!);
+}
+
 function createFacility() {
     if (!newPin.value) return;
     upsertFacilityModal.value?.open({ lat: newPin.value.lat, lon: newPin.value.lng });
@@ -409,13 +399,22 @@ function editFacility(facility: Facility) {
 }
 
 async function onFacilitySaved(facility: Facility) {
-    const res = await request.post('/facility', facility);
+    const res = await request.post('/admin/facility', facility);
     if (facility.facility_id) {
         const idx = facilities.value.findIndex(f => f.facility_id === facility.facility_id);
         if (idx !== -1) facilities.value[idx] = res.data.data;
     } else {
         facilities.value.push(res.data.data);
-        clearNewPin();
+        cancelAddFacilityMode();
+    }
+}
+
+async function onFacilityDeleted(facilityId: string) {
+    await request.delete(`/admin/facility/${facilityId}`);
+    facilities.value = facilities.value.filter(f => f.facility_id !== facilityId);
+    if (selectedFacilityId.value === facilityId) {
+        selectedFacilityId.value = null;
+        detailDrawer.value?.trigger()?.close();
     }
 }
 
@@ -474,13 +473,34 @@ function startWatchingUser() {
     <div class="map-wrapper">
         <div ref="mapEl" class="map-container" />
         <div v-if="locationError" class="location-error">{{ locationError }}</div>
-        <div v-if="newPin" class="new-facility-bar">
-            <span class="new-facility-coords">{{ newPin.lat.toFixed(5) }}, {{ newPin.lng.toFixed(5) }}</span>
-            <button class="new-facility-btn" @click="createFacility">+ Create Facility Here</button>
-            <button class="new-facility-cancel" @click="clearNewPin" aria-label="Cancel">✕</button>
+        <div class="add-facility-control">
+            <Button
+                v-if="!isAddFacilityMode && isAdmin"
+                label="Add Facility"
+                icon="pi pi-plus"
+                severity="contrast"
+                @click="startAddFacilityMode"
+            />
+        </div>
+        <div class="settings-control">
+            <Button
+                icon="pi pi-cog"
+                text
+                rounded
+                aria-label="Settings"
+                @click="settingsModal?.open()"
+            />
+        </div>
+        <div v-if="isAddFacilityMode" class="new-facility-bar">
+			<template v-if="newPin">
+				<span class="new-facility-coords">{{ newPin.lat.toFixed(5) }}, {{ newPin.lng.toFixed(5) }} · </span>
+				<button class="new-facility-btn" @click="createFacility">+ Create Facility Here</button>
+			</template>
+			<template v-else>Tap to set a new location</template>
+            <button class="new-facility-cancel" @click="cancelAddFacilityMode" aria-label="Cancel">✕</button>
         </div>
         <Transition name="card-tray">
-            <div v-if="!newPin && sortedFacilities.length" class="facility-card-tray p-3 flex flex-column gap-1">
+            <div v-if="!newPin && !isAddFacilityMode && sortedFacilities.length" class="facility-card-tray p-3 flex flex-column gap-1">
 				<div class="flex gap-2 flex-wrap">
 					<Select
 						v-if="availableDesignations.length" 
@@ -569,7 +589,7 @@ function startWatchingUser() {
             </div>
         </Transition>
     </div>
-    <UpsertFacilityModal ref="upsertFacilityModal" @save="onFacilitySaved" />
+    <UpsertFacilityModal ref="upsertFacilityModal" @save="onFacilitySaved" @delete="onFacilityDeleted" />
     <NavTriggerDrawer
         ref="detailDrawer"
         trigger-key="facility-detail"
@@ -623,14 +643,6 @@ function startWatchingUser() {
                 </div>
 
                 <div class="facility-detail-actions">
-                    <button
-                        data-testid="facility-edit-btn"
-                        class="facility-card-btn facility-card-btn--details"
-                        @click="editFacility(selectedFacility)"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                        Edit
-                    </button>
                     <a
                         v-if="selectedFacility.phone"
                         :href="'tel:' + selectedFacility.phone"
@@ -648,10 +660,20 @@ function startWatchingUser() {
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
                         Directions
                     </a>
+                    <button
+                        v-if="isAdmin"
+                        data-testid="facility-edit-btn"
+                        class="facility-card-btn facility-card-btn--details"
+                        @click="editFacility(selectedFacility)"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                        Edit
+                    </button>
                 </div>
             </div>
         </template>
     </NavTriggerDrawer>
+    <SettingsDrawerModal ref="settingsModal" />
 </template>
 
 <style scoped lang="scss">
@@ -678,6 +700,20 @@ function startWatchingUser() {
     border-radius: 4px;
     font-size: 0.85rem;
     pointer-events: none;
+}
+
+.add-facility-control {
+    position: absolute;
+    top: 1rem;
+    left: 1rem;
+    z-index: 1000;
+}
+
+.settings-control {
+    position: absolute;
+    top: 4rem;
+    left: 1rem;
+    z-index: 1000;
 }
 
 .new-facility-bar {

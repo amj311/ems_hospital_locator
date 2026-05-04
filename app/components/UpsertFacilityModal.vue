@@ -95,6 +95,7 @@ watch(showLocationPicker, async (show) => {
 
 const emit = defineEmits<{
     save: [facility: Facility];
+    delete: [facilityId: string];
 }>();
 
 const form = reactive({
@@ -251,6 +252,14 @@ function onFormSubmit({ valid, states }: FormSubmitEvent) {
     drawerModal.value?.close();
 }
 
+function onDeleteClick() {
+    if (!form.facility_id) return;
+    const confirmed = window.confirm(`Delete ${form.name || 'this facility'}? This cannot be undone.`);
+    if (!confirmed) return;
+    emit('delete', form.facility_id);
+    drawerModal.value?.close();
+}
+
 defineExpose({ open });
 </script>
 
@@ -374,6 +383,15 @@ defineExpose({ open });
             </div>
         </div>
         <div class="flex align-items-center justify-content-end gap-2">
+            <Button
+                v-if="isEditing"
+                label="Delete"
+                icon="pi pi-trash"
+                severity="danger"
+                outlined
+                class="mr-auto"
+                @click="onDeleteClick"
+            />
             <Button label="Cancel" severity="secondary" text @click="() => drawerModal?.close()" />
             <Button
                 :label="isEditing ? 'Save Changes' : 'Add Facility'"

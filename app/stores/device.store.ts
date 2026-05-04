@@ -1,4 +1,4 @@
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { defineStore } from 'pinia'
 
 export const useDeviceStore = defineStore('Device', () => {
@@ -32,10 +32,20 @@ export const useDeviceStore = defineStore('Device', () => {
 	}, { immediate: true });
 
 	const isIOS = ref(/iPad|iPhone|iPod/.test(navigator.userAgent));
+	const isAndroid = ref(/Android|android/.test(navigator.userAgent));
+	const isDesktop = computed(() => !isIOS.value && !isAndroid.value);
+	const platform = computed((): 'ios' | 'android' | 'desktop' => {
+		if (isIOS.value) return 'ios';
+		if (isAndroid.value) return 'android';
+		return 'desktop';
+	});
 
 	return {
 		isSkinnyScreen,
 		isTouch,
 		isIOS,
+		isAndroid,
+		isDesktop,
+		platform,
 	}
 })

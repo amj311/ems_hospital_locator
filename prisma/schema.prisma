@@ -35,7 +35,7 @@ model FacilityService {
 
     type String
 
-    facility    Facility @relation(fields: [facility_id], references: [facility_id])
+    facility    Facility @relation(fields: [facility_id], references: [facility_id], onDelete: Cascade)
     facility_id String
 }
 
@@ -47,7 +47,7 @@ model FacilityDesignation {
     type     String
     level    Int?
 
-    facility    Facility @relation(fields: [facility_id], references: [facility_id])
+    facility    Facility @relation(fields: [facility_id], references: [facility_id], onDelete: Cascade)
     facility_id String
 }
 
