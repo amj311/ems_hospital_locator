@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import DrawerModal from './DrawerModal.vue';
+import DrawerModal from './utils/DrawerModal.vue';
 import { useSettingsStore } from '@/stores/settings.store';
 import RadioButton from 'primevue/radiobutton';
 import Button from 'primevue/button';

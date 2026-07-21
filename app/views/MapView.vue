@@ -4,7 +4,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { onMounted, onBeforeUnmount, ref, watch, computed, nextTick } from 'vue';
 import UpsertFacilityModal from '@/components/UpsertFacilityModal.vue';
-import SettingsDrawerModal from '@/components/utils/SettingsDrawerModal.vue';
+import SettingsDrawerModal from '@/components/SettingsDrawerModal.vue';
 import NavTriggerDrawer from '@/components/utils/NavTrigger/NavTriggerDrawer.vue';
 import type { Facility } from 'core/models/Facility';
 import { KNOWN_DESIGNATIONS } from 'core/models/Designation';
@@ -19,6 +19,7 @@ import Button from 'primevue/button';
 import { useUserStore } from '@/stores/user.store';
 import { useSettingsStore } from '@/stores/settings.store';
 import { useDeviceStore } from '@/stores/device.store';
+import LoginModal from '@/components/LoginModal.vue';
 
 const props = withDefaults(defineProps<{
     followUser?: boolean;
@@ -29,9 +30,12 @@ const props = withDefaults(defineProps<{
 const userStore = useUserStore();
 const settingsStore = useSettingsStore();
 const deviceStore = useDeviceStore();
+const isLoggedIn = computed(() => userStore.hasAuth);
 const isAdmin = computed(() => userStore.currentUser?.isAdmin ?? false);
 
 const OSRM_UPDATE_THRESHOLD_METERS = 200;
+
+const INIT_LOCATION = { lat: 40.3240075376473, lon: -111.83588467980381 };
 
 const facilities = ref<Facility[]>([]);
 const userPosition = ref<{ lat: number; lon: number } | null>(null);
@@ -223,6 +227,7 @@ let droppedPin: L.Marker | null = null;
 const upsertFacilityModal = ref<InstanceType<typeof UpsertFacilityModal> | null>(null);
 const detailDrawer = ref<InstanceType<typeof NavTriggerDrawer> | null>(null);
 const settingsModal = ref<InstanceType<typeof SettingsDrawerModal> | null>(null);
+const loginModal = ref<InstanceType<typeof LoginModal> | null>(null);
 
 function openFacilityDetail(facility: Facility) {
     selectedFacilityId.value = facility.facility_id!;
@@ -240,7 +245,7 @@ L.Icon.Default.mergeOptions({
 onMounted(() => {
     if (!mapEl.value) return;
 
-    map = L.map(mapEl.value, { zoomControl: false }).setView([39.5, -98.35], 4);
+    map = L.map(mapEl.value, { zoomControl: false }).setView([INIT_LOCATION.lat, INIT_LOCATION.lon], 11);
     L.control.zoom({ position: 'topright' }).addTo(map);
 
     // CartoDB Voyager — road hierarchy with color distinctions, no API key required
@@ -252,6 +257,9 @@ onMounted(() => {
 
     renderPins();
     startWatchingUser();
+
+	// initialize default pin location
+	lastComputedPosition.value = { ...INIT_LOCATION };
 
     map.on('click', (e: L.LeafletMouseEvent) => {
         if (!isAddFacilityMode.value && !newPin.value) return;
@@ -473,21 +481,26 @@ function startWatchingUser() {
     <div class="map-wrapper">
         <div ref="mapEl" class="map-container" />
         <div v-if="locationError" class="location-error">{{ locationError }}</div>
-        <div class="add-facility-control">
+        <div v-if="!isAddFacilityMode" class="top-left-buttons">
             <Button
-                v-if="!isAddFacilityMode && isAdmin"
+                v-if="isAdmin"
                 label="Add Facility"
                 icon="pi pi-plus"
                 severity="contrast"
                 @click="startAddFacilityMode"
             />
-        </div>
-        <div class="settings-control">
+            <Button
+                v-if="!isLoggedIn"
+                label="Login"
+                severity="contrast"
+                @click="() => loginModal?.open()"
+            />
             <Button
                 icon="pi pi-cog"
                 text
                 rounded
                 aria-label="Settings"
+				size="large"
                 @click="settingsModal?.open()"
             />
         </div>
@@ -560,7 +573,8 @@ function startWatchingUser() {
                         <div class="facility-card-item-actions">
                             <a
                                 v-if="facility.phone"
-                                :href="'tel:' + facility.phone"
+                                :href="useUserStore().hasAuth ? ('tel:' + facility.phone) : undefined"
+								@click.stop="() => useUserStore().hasAuth ? undefined : loginModal?.open()"
                                 class="facility-card-btn facility-card-btn--call"
                             >
                                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.68 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.59 1.17h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.73a16 16 0 0 0 6.29 6.29l1.13-.92a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
@@ -589,8 +603,10 @@ function startWatchingUser() {
             </div>
         </Transition>
     </div>
-    <UpsertFacilityModal ref="upsertFacilityModal" @save="onFacilitySaved" @delete="onFacilityDeleted" />
-    <NavTriggerDrawer
+    
+	<UpsertFacilityModal ref="upsertFacilityModal" @save="onFacilitySaved" @delete="onFacilityDeleted" />
+    
+	<NavTriggerDrawer
         ref="detailDrawer"
         trigger-key="facility-detail"
         :width="28"
@@ -620,7 +636,7 @@ function startWatchingUser() {
                     </div>
                 </div>
 
-                <div v-if="selectedFacility.phone" class="facility-detail-section">
+                <div v-if="selectedFacility.phone && useUserStore().hasAuth" class="facility-detail-section">
                     <div class="facility-detail-section-label">Phone</div>
                     <a :href="'tel:' + selectedFacility.phone" class="facility-detail-phone">{{ selectedFacility.phone }}</a>
                 </div>
@@ -645,7 +661,9 @@ function startWatchingUser() {
                 <div class="facility-detail-actions">
                     <a
                         v-if="selectedFacility.phone"
-                        :href="'tel:' + selectedFacility.phone"
+                        
+						:href="useUserStore().hasAuth ? ('tel:' + selectedFacility.phone) : undefined"
+						@click.stop="() => useUserStore().hasAuth ? undefined : loginModal?.open()"
                         class="facility-card-btn facility-card-btn--call"
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.68 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.59 1.17h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.73a16 16 0 0 0 6.29 6.29l1.13-.92a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
@@ -674,6 +692,7 @@ function startWatchingUser() {
         </template>
     </NavTriggerDrawer>
     <SettingsDrawerModal ref="settingsModal" />
+	<LoginModal ref="loginModal" />
 </template>
 
 <style scoped lang="scss">
@@ -702,18 +721,15 @@ function startWatchingUser() {
     pointer-events: none;
 }
 
-.add-facility-control {
+.top-left-buttons {
     position: absolute;
     top: 1rem;
     left: 1rem;
     z-index: 1000;
-}
 
-.settings-control {
-    position: absolute;
-    top: 4rem;
-    left: 1rem;
-    z-index: 1000;
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
 }
 
 .new-facility-bar {
