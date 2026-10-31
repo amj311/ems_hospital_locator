@@ -4,15 +4,15 @@ services:
       context: .
       dockerfile: ./Dockerfile.server.dev
     labels:
-      - "com.docker.compose.project=talaria-web"
-    container_name: talaria-server-dev
+      - "com.docker.compose.project=beacon-web"
+    container_name: beacon-server-dev
     command: ["yarn", "server:dev"]
     restart: on-failure:max=2
     ports:
-      - 5000:5000
+      - 5001:5000
     depends_on:
       - db
-      - osrm
+      # - osrm
     volumes:
       # Mount the source code for live reload
       - ./:/app
@@ -24,16 +24,16 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - NODE_ENV=development
-      - OSRM_BASE_URL=http://osrm:5000
+      - DATABASE_URL=postgresql://postgres:password@db:5432/beacon
     
   frontend:
     build:
       context: .
       dockerfile: ./Dockerfile.frontend.dev
-    container_name: talaria-frontend-dev
+    container_name: beacon-frontend-dev
     restart: unless-stopped
     ports:
-      - 5173:5173
+      - 5174:5173
     volumes:
       # Mount the source code for live reload
       - ./:/app
@@ -43,35 +43,35 @@ services:
       - NODE_ENV=development
     
   db:
-    image: talaria-db:latest
+    image: beacon-db:latest
     pull_policy: never
-    container_name: talaria-db-dev
+    container_name: beacon-db-dev
     build:
       context: .
       dockerfile: ./Dockerfile.db
     labels:
-      - "com.docker.compose.project=talaria-web"
+      - "com.docker.compose.project=beacon-web"
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=password
-      - POSTGRES_DB=talaria
+      - POSTGRES_DB=beacon
     ports:
-      - 3002:5432
+      - 3003:5432
     volumes:
       - db-data:/var/lib/postgresql/data
 
-  osrm:
-    image: osrm/osrm-backend
-    container_name: talaria-osrm-dev
-    command: osrm-routed --algorithm mld /data/utah-latest.osrm --max-table-size 1000
-    restart: unless-stopped
-    ports:
-      - "5001:5000"
-    volumes:
-      - ${OSRM_DATA_PATH:-./osrm-data}:/data
-    labels:
-      - "com.docker.compose.project=talaria-web"
+  # osrm:
+  #   image: osrm/osrm-backend
+  #   container_name: beacon-osrm-dev
+  #   command: osrm-routed --algorithm mld /data/utah-latest.osrm --max-table-size 1000
+  #   restart: unless-stopped
+  #   ports:
+  #     - "5001:5000"
+  #   volumes:
+  #     - ${OSRM_DATA_PATH:-./osrm-data}:/data
+  #   labels:
+  #     - "com.docker.compose.project=beacon-web"
 
 volumes:
   db-data:
-    name: talaria-data
+    name: beacon-data

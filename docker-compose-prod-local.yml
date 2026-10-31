@@ -3,11 +3,11 @@ services:
     build:
       context: .
       dockerfile: ./Dockerfile.server.prod
-    image: talaria-server
+    image: beacon-server
     pull_policy: never
     labels:
-      - "com.docker.compose.project=talaria-web"
-    container_name: talaria-server
+      - "com.docker.compose.project=beacon-web"
+    container_name: beacon-server
     restart: on-failure:max=2
     ports:
       - 3021:5000
@@ -17,40 +17,40 @@ services:
       - db
 
   db:
-    image: talaria-db:latest
+    image: beacon-db:latest
     pull_policy: never
-    container_name: talaria-db
+    container_name: beacon-db
     restart: on-failure:max=2
     build:
       context: .
       dockerfile: ./Dockerfile.db
     labels:
-      - "com.docker.compose.project=talaria-web"
+      - "com.docker.compose.project=beacon-web"
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=password
-      - POSTGRES_DB=talaria
+      - POSTGRES_DB=beacon
     ports:
       - 3022:5432
     volumes:
       - db-data:/var/lib/postgresql/data
 
   backup:
-    image: talaria-backup:latest
+    image: beacon-backup:latest
     pull_policy: never
-    container_name: talaria-backup
+    container_name: beacon-backup
     restart: on-failure:max=2
     build:
       context: .
       dockerfile: ./Dockerfile.backup
     labels:
-      - "com.docker.compose.project=talaria-web"
+      - "com.docker.compose.project=beacon-web"
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=password
-      - POSTGRES_DB=talaria
+      - POSTGRES_DB=beacon
     volumes:
-      - /Users/Arthur/code/talaria-web/backups:/backup-dir
+      - /Users/Arthur/code/beacon-web/backups:/backup-dir
     depends_on:
       - db
     links:
@@ -58,4 +58,4 @@ services:
 
 volumes:
   db-data:
-    name: talaria-data
+    name: beacon-data

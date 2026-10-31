@@ -6,7 +6,7 @@ interface RequestWithSessionUser {
 }
 import path from "path";
 import { createReadStream, readFileSync } from "fs";
-import sessionAuthMiddleware, { firebaseConfig } from "./services/SessionService";
+import sessionAuthMiddleware from "./services/SessionService";
 import signupRoute from "./routes/signup.route";
 
 // HTTPS was only needed for testing with plaid
@@ -25,12 +25,6 @@ app.register(require('@fastify/cors'), {
 	methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
 });
 
-app.get('/firebase-config', () => {
-	return {
-		data: firebaseConfig
-	}
-});
-
 // Signup routes
 app.register(signupRoute, { prefix: '/signup' });
 
@@ -41,16 +35,17 @@ app.addHook('onResponse', (request, reply) => {
 
 // unauthenticated routes
 app.register((api, _, done) => {
-	api.register(require('./routes/facility.route'), { prefix: '/facility' });
+    api.register(require('./routes/auth.route'), { prefix: '/auth' });
 
-	done();
+    done();
 }, { prefix: '/api' });
 
 // authenticated routes
 app.register((api, _, done) => {
 	api.addHook('preValidation', sessionAuthMiddleware);
 
-	api.register(require('./routes/user.route'), { prefix: '/user' });
+	api.register(require('./routes/share.route'), { prefix: '/shares' });
+	api.register(require('./routes/device.route'), { prefix: '/device' });
 
 	api.setNotFoundHandler((req, reply) => {
 		reply.status(404).send({ message: 'Not Found' });

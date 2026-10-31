@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { emojis } from '@/utils/icons';
 import { Icons, type IconName, colors, type Icon, type IconIdentifier } from 'core/utils/constants';
 import { computed } from 'vue';
 
@@ -11,6 +12,12 @@ const props = defineProps<{
 }>();
 
 const icon = computed<Icon>(() => {
+	if (emojis[props.source_id || '']) {
+		return {
+			source: 'emoji',
+			source_id: props.source_id,
+		}
+	}
 	if (Icons[props.name || '']) {
 		return Icons[props.name || ''];
 	}
@@ -34,6 +41,9 @@ const color = computed(() => colors[props.color || ''] || props.color || 'inheri
 		<template v-if="icon.source === 'material-symbols'">
 			<span class="icon material-symbols-rounded" :class="{ fill }" :style="icon.style">{{ icon.source_id }}</span>
 		</template>
+		<template v-if="icon.source === 'emoji'">
+			<span class="icon emoji">{{ icon.source_id }}</span>
+		</template>
 	</span>
 </template>
 
@@ -55,5 +65,13 @@ const color = computed(() => colors[props.color || ''] || props.color || 'inheri
 	&.fill {
 		font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' -25, 'opsz' 12;
 	}
+}
+
+@font-face {
+	font-family: 'emoji';
+	src: url('/app/assets/FluentEmojiFlat.ttf');
+}
+.emoji {
+	font-family: 'emoji';
 }
 </style>

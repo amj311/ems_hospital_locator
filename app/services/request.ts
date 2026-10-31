@@ -1,14 +1,15 @@
 import axios from "axios";
 import { AuthService } from "./authService";
+import { CryptoUtils } from "core/utils/crypto";
 
-const baseURL = window.location.href.includes('localhost:517') ? 'http://localhost:5000/api' : '/api'
+const baseURL = window.location.href.includes('localhost:517') ? 'http://localhost:5001/api' : '/api'
 
 const request = axios.create({
 	baseURL,
 })
 
 request.interceptors.request.use(async (config) => {
-	const token = await AuthService.getToken();
+	const token = await CryptoUtils.sha256Hash(AuthService.getValidToken() || '');
 	if (token) {
 		config.headers.Authorization = token;
 	}
@@ -19,7 +20,7 @@ request.interceptors.request.use(async (config) => {
 request.interceptors.response.use(null, (error) => {
 	if (error.isAxiosError && error.response?.status === 401) {
 		console.log("Received unauthorized response. Logging out");
-		AuthService.signOut();
+		AuthService.clearSession();
 	}
 	throw error;
 })

@@ -3,22 +3,31 @@ import SwipeAction from './components/utils/SwipeAction.vue';
 import { useUserStore } from './stores/user.store';
 import { AuthService } from './services/authService';
 import Registration from './views/Registration.vue';
-import { onBeforeMount, onBeforeUnmount, ref } from 'vue';
+import { onBeforeMount, onBeforeUnmount, onMounted, ref } from 'vue';
 import PromptModal from './components/utils/PromptModal.vue';
 import Toast from 'primevue/toast';
 import Button from 'primevue/button';
 import Snackbar from './components/utils/Toast.vue';
 import Message from 'primevue/message';
-import MapView from './views/MapView.vue';
 import { useDeviceStore } from './stores/device.store';
+import { time } from 'core/utils/timeUtils.js';
+import LoginForm from './components/LoginForm.vue';
+import { useRouter } from 'vue-router';
+import MapView from './views/MapView.vue';
+import ShareEditDrawer from './components/ShareEditDrawer.vue';
+import { useMapStore } from './stores/map.store.js';
 
 const userStore = useUserStore();
-const sessionInterval = setInterval(userStore.loadSessionData, 60000);
+const sessionInterval = setInterval(userStore.loadSessionData, time(1, 'minute').ms);
 
 const waitingForAuth = ref(true);
 setTimeout(() => {
 	waitingForAuth.value = false;
 }, 1000); // wait for 1 second before showing the app
+
+onMounted(async () => {
+	await userStore.loadSessionData();
+});
 
 onBeforeUnmount(() => {
 	clearInterval(sessionInterval);
@@ -31,46 +40,27 @@ onBeforeUnmount(() => {
 	<Message severity="info" style="display: none;" />
 
 	<div class="app h-full" :class="{ touch: useDeviceStore().isTouch }">
-		<!-- <LoggedIn v-if="!waitingForAuth && userStore.hasAuth && userStore.currentUser" /> -->
-		<div v-if="waitingForAuth" class="flex flex-column align-items-center" style="padding-top: calc(33vh - 5rem)">
-			<img src="./assets/caduceus-vistaprint.png" alt="Talaria Logo" class="mb-4" style="width: 20em" />
-			<div v-if="waitingForAuth || userStore.isLoading" class="flex align-items-center">
-				<i class="pi pi-spin pi-spinner mr-2"></i>
-				Loading...
-			</div>
-			<!-- <div v-else-if="userStore.hasAuth && !userStore.currentUser">Talaria is not available at this time.</div>
-			<div v-else>
-				<Button @click="AuthService.signInWithGoogle()">Sign in with Google</Button>
-			</div> -->
+		<div v-if="waitingForAuth || !userStore.hasLoadedSessionData" class="flex flex-column align-items-center" style="padding-top: calc(15vh - 5rem)">
+			<img src="./assets/logo-orbit.png" alt="beacon Logo" class="mb-2" style="width: 15em" />
+			<div>Loading...</div>
 		</div>
+
+		<LoginForm v-else-if="!userStore.hasAuth" />
 
 		<div v-else class="app-container">
-			<!-- <header class="app-header">
-				<nav class="main-nav">
-					<router-link to="/" class="nav-link flex align-items-center gap-2">
-						<i class="pi pi-home" />
-						Home
-					</router-link>
-					<router-link to="/month" class="nav-link flex align-items-center gap-2">
-						<i class="pi pi-wallet" />
-						Budget
-					</router-link>
-					<router-link to="/accounts" class="nav-link flex align-items-center gap-1">
-						<Icon name="bank" />
-						Accounts
-					</router-link>
-					<router-link to="/rules" class="nav-link flex align-items-center gap-1">
-						<Icon name="material-symbols::manufacturing" />
-						Rules
-					</router-link>
-				</nav>
-			</header> -->
-			<main class="app-content">
-				<RouterView />
+			<main class="app-content relative">
+				<MapView :ref="mapRef => useMapStore().setMapRef(mapRef as InstanceType<typeof MapView>)" />
+				<RouterView v-slot="{ Component }">
+					<!-- <Transition :duration="30000"> -->
+						<component :is="Component" />
+					<!-- </Transition> -->
+				</RouterView>
 			</main>
 		</div>
+
 	</div>
 
+	<ShareEditDrawer ref="shareEditDrawer" />
 	<PromptModal />
 	<Snackbar />
 </template>

@@ -13,17 +13,17 @@ const selectedProvider = ref(settingsStore.localSettings.mapsProvider);
 
 function handleSave() {
 	settingsStore.localSettings.mapsProvider = selectedProvider.value;
-	drawerModal.value?.close();
+	drawerModal.value?.trigger()?.close();
 }
 
 function handleCancel() {
 	selectedProvider.value = settingsStore.localSettings.mapsProvider;
-	drawerModal.value?.close();
+	drawerModal.value?.trigger()?.close();
 }
 
 function open() {
 	selectedProvider.value = settingsStore.localSettings.mapsProvider;
-	drawerModal.value?.open();
+	drawerModal.value?.trigger()?.open();
 }
 
 defineExpose({ open });
@@ -33,7 +33,7 @@ defineExpose({ open });
 	<DrawerModal ref="drawerModal" title="Settings" width="28rem">
 		<div class="settings-container flex flex-column gap-4">
 			<div class="maps-provider-section">
-				<h3 class="settings-section-title">Maps Provider</h3>
+				<h3 class="settings-section-title">Navigation service</h3>
 				<div class="flex flex-column gap-3 ml-2">
 					<div class="flex align-items-center">
 						<RadioButton

@@ -21,3 +21,5 @@ export function distanceInMeters(
 
     return 2 * EARTH_RADIUS_METERS * Math.asin(Math.sqrt(a));
 }
+
+export type Coords = { lat: number, lng: number };

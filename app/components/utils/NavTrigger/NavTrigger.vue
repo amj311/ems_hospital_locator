@@ -16,13 +16,13 @@ const useStore = defineStore('NavTrigger', () => {
 		return router.currentRoute.value.query.v?.toString() || '';
 	});
 
-	function open(viewKey: string) {
+	function open(viewKey: string, cb?: () => void) {
 		try {
 			viewStack.value.push(viewKey);
 			router.push({
 				query: { ...router.currentRoute.value.query, v: viewKey },
 			});
-			document.body.classList.add('prevent-scroll');
+			cb?.();
 		} catch (error) {
 			console.error('Error opening NavTrigger:', error);
 		}
@@ -46,8 +46,6 @@ const useStore = defineStore('NavTrigger', () => {
 					document.title,
 					router.currentRoute.value.path
 				);
-				// also restore scroll
-				document.body.classList.remove('prevent-scroll');
 			}
 		},
 		{ immediate: true }
@@ -73,6 +71,10 @@ export default {
 			type: Function,
 			required: false,
 		},
+		onOpen: {
+			type: Function,
+			required: false,
+		},
 	},
 	setup(props) {
 		const store = useStore();
@@ -86,7 +88,7 @@ export default {
 
 		return {
 			show,
-			open: () => store.open(trueKey.value),
+			open: () => store.open(trueKey.value, props.onOpen),
 			close: () => store.close(props.onClose),
 		};
 	},

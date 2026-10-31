@@ -2,7 +2,7 @@ import PrimeVue from 'primevue/config';
 import Aura from '@primeuix/themes/aura';
 import 'primeicons/primeicons.css'
 import 'primeflex/primeflex.css'
-import './assets/main.css'
+import './assets/main.scss'
 
 
 import { createApp } from 'vue'
@@ -38,9 +38,4 @@ app.use(router);
 app.use(ConfirmationService);
 app.directive('tooltip', Tooltip);
 
-(async () => {
-	AuthService.setupAuth();
-})()
-
 app.mount('#app');
-

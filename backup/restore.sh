@@ -1,14 +1,14 @@
 #!/bin/sh
 
-PROJECT="talaria"
+PROJECT="beacon"
 BACKUP_DIR="${HOME}/backups/${PROJECT}"
-VOLUME="talaria-db"
+VOLUME="beacon-db"
  
 POSTGRES_USER="postgres" # Replace with your database user
 POSTGRES_PASS="password" # Replace with your database password
 POSTGRES_HOST="db" # Replace with your database host
 POSTGRES_PORT="5432" # Replace with your database port
-POSTGRES_DB="talaria" # Replace with your database port
+POSTGRES_DB="beacon" # Replace with your database port
 
 
 MODE="$1"

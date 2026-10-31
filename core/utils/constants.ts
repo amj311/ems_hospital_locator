@@ -107,6 +107,7 @@ export const colors = {
 
 const IconSources = [
 	'material-symbols',
+	'emoji'
 ] as const;
 export type IconSource = typeof IconSources[number];
 

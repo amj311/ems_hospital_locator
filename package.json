@@ -1,5 +1,5 @@
 {
-  "name": "talaria-web",
+  "name": "beacon-web",
   "version": "0.0.0",
   "private": true,
   "scripts": {
@@ -11,8 +11,8 @@
     "test:unit": "vitest",
     "build-only": "vite build",
     "type-check": "vue-tsc --noEmit -p tsconfig.vitest.json --composite false",
-    "db:push:both": "yarn db:generate && docker exec talaria-server-dev yarn db:push && docker exec talaria-server-dev yarn db:generate",
-    "db:push:both:accept": "yarn db:generate && docker exec talaria-server-dev yarn db:push --accept-data-loss && docker exec talaria-server-dev yarn db:generate",
+    "db:push:both": "yarn db:generate && docker exec beacon-server-dev yarn db:push && docker exec beacon-server-dev yarn db:generate",
+    "db:push:both:accept": "yarn db:generate && docker exec beacon-server-dev yarn db:push --accept-data-loss && docker exec beacon-server-dev yarn db:generate",
     "db:push": "cd prisma && npx prisma db push",
     "db:generate": "cd prisma && npx prisma generate",
     "local-prod": "docker compose -f docker-compose-prod-local.yml up -d --build --force-recreate > /dev/null"
@@ -20,18 +20,28 @@
   "dependencies": {
     "@fastify/cors": "^11.0.1",
     "@fastify/static": "^8.2.0",
+    "@noble/ciphers": "^2.4.0",
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.4.0",
     "@primevue/forms": "^4.5.4",
-    "@prisma/client": "^5.2.0",
+    "@prisma/client": "^6.19.0",
+    "@scure/bip39": "^2.4.0",
     "@types/uuid": "^9.0.3",
+    "@vue-leaflet/vue-leaflet": "^0.10.1",
+    "add": "^2.0.9",
     "axios": "^1.5.0",
     "dayjs": "^1.11.9",
     "dotenv": "^16.3.1",
     "fastify": "^5.0.0",
     "firebase-admin": "^11.10.1",
     "leaflet": "^1.9.4",
-    "prisma": "^5.2.0",
+    "micro-ed25519-hdkey": "^0.1.2",
+    "prisma": "^6.19.0",
     "tsx": "^4.20.1",
-    "uuid": "^9.0.0"
+    "uuid": "^9.0.0",
+    "vue-qrcode-reader": "^5.7.3",
+    "webrtc-adapter": "^9.0.6",
+    "yarn": "^1.22.22"
   },
   "devDependencies": {
     "@primeuix/themes": "^1.1.2",

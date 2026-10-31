@@ -2,215 +2,89 @@
 <script setup lang="ts">
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { onMounted, onBeforeUnmount, ref, watch, computed, nextTick } from 'vue';
-import UpsertFacilityModal from '@/components/UpsertFacilityModal.vue';
+import { onMounted, onBeforeUnmount, ref, watch, computed, nextTick, createApp } from 'vue';
+// import UpsertLocationShareModal from '@/components/UpsertLocationShareModal.vue';
 import SettingsDrawerModal from '@/components/SettingsDrawerModal.vue';
 import NavTriggerDrawer from '@/components/utils/NavTrigger/NavTriggerDrawer.vue';
-import type { Facility } from 'core/models/Facility';
-import { KNOWN_DESIGNATIONS } from 'core/models/Designation';
-import { KNOWN_SERVICES, SERVICE_CATEGORIES } from 'core/models/Service';
-import Tag from 'primevue/tag';
-import Select from 'primevue/select';
-import MultiSelect from 'primevue/multiselect';
-import { distanceInMeters } from 'core/utils/geoUtils';
 import { buildDirectionsUrl } from 'core/utils/directionsUtils';
-import request from '@/services/request';
-import Button from 'primevue/button';
 import { useUserStore } from '@/stores/user.store';
 import { useSettingsStore } from '@/stores/settings.store';
 import { useDeviceStore } from '@/stores/device.store';
-import LoginModal from '@/components/LoginModal.vue';
+import type { LocationShare } from 'core/models/LocationShare';
+import { useShareStore } from '@/stores/shares.store';
+import SharePin from '@/views/SharePin.vue';
+import debounce from '@/utils/debounce';
+import { time } from 'core/utils/timeUtils';
+import { useMapStore } from '@/stores/map.store';
+import { useRouter } from 'vue-router';
 
-const props = withDefaults(defineProps<{
-    followUser?: boolean;
-}>(), {
-    followUser: true,
-});
+const router = useRouter();
 
 const userStore = useUserStore();
 const settingsStore = useSettingsStore();
 const deviceStore = useDeviceStore();
 const isLoggedIn = computed(() => userStore.hasAuth);
-const isAdmin = computed(() => userStore.currentUser?.isAdmin ?? false);
 
-const OSRM_UPDATE_THRESHOLD_METERS = 200;
-
-const INIT_LOCATION = { lat: 40.3240075376473, lon: -111.83588467980381 };
-
-const facilities = ref<Facility[]>([]);
+const shares = computed(() => useShareStore().sharedToDevice);
 const userPosition = ref<{ lat: number; lon: number } | null>(null);
-const lastComputedPosition = ref<{ lat: number; lon: number } | null>(null);
-const pinDistances = ref<Map<string, number>>(new Map());
-const pinTimes = ref<Map<string, number>>(new Map());
-const selectedFacilityId = ref<string | null>(null);
-const selectedFacility = computed(() => facilities.value.find(f => f.facility_id === selectedFacilityId.value) ?? null);
+// const lastComputedPosition = ref<{ lat: number; lon: number } | null>(null);
+
+const selectedShareId = ref<string | null>(null);
+const selectedShare = computed(() => shares.value.find(f => f.location_share_id === selectedShareId.value) ?? null);
 const designationFilter = ref<string | null>(null);
 const serviceFilters = ref<string[]>([]);
 
-const sortedFacilities = computed(() => {
-    return [...facilities.value].sort((a, b) => {
-        const ta = pinTimes.value.get(a.facility_id!);
-        const tb = pinTimes.value.get(b.facility_id!);
-        if (ta !== undefined && tb !== undefined) return ta - tb;
-        if (ta !== undefined) return -1;
-        if (tb !== undefined) return 1;
-        const da = pinDistances.value.get(a.facility_id!) ?? Infinity;
-        const db = pinDistances.value.get(b.facility_id!) ?? Infinity;
-        return da - db;
+const sortedShares = computed(() => {
+    return [...shares.value].sort((a, b) => {
+		return 0;
     });
 });
 
-const availableDesignations = computed(() => {
-    const types = new Set<string>();
-    for (const f of facilities.value) {
-        for (const d of f.Designations ?? []) {
-            types.add(d.type);
-        }
-    }
-    return [...types].map(type => ({
-        type,
-        displayName: KNOWN_DESIGNATIONS[type]?.displayName ?? type,
-    }));
-});
+// const cardEls = new Map<string, HTMLElement>();
+// const cardScrollEl = ref<HTMLElement | null>(null);
 
-const availableServices = computed(() => {
-    const types = new Set<string>();
-    for (const f of facilities.value) {
-        for (const s of f.Services ?? []) {
-            types.add(s.type);
-        }
-    }
-    return [...types].map(type => ({
-        type,
-        displayName: KNOWN_SERVICES[type]?.displayName ?? type,
-    }));
-});
+// function setCardEl(id: string, el: any) {
+//     if (el) cardEls.set(id, el as HTMLElement);
+//     else cardEls.delete(id);
+// }
 
-const CATEGORY_LABELS: Record<string, string> = {
-    emergency_access: 'Emergency Access',
-    imaging_diagnostics: 'Imaging & Diagnostics',
-    cardiac: 'Cardiac',
-    neurology: 'Neurology',
-    surgery: 'Surgery',
-    critical_care: 'Critical Care',
-    specialty_units: 'Specialty Units',
-    respiratory_resuscitation: 'Respiratory & Resuscitation',
-    toxicology: 'Toxicology',
-    rehabilitation: 'Rehabilitation',
-};
+// watch(filteredShares, () => {
+//     nextTick(() => {
+//         if (cardScrollEl.value && !selectedShare.value) cardScrollEl.value.scrollLeft = 0;
+//     });
+// });
 
-const serviceOptions = computed(() => {
-    const available = new Set(availableServices.value.map(s => s.type));
-    return SERVICE_CATEGORIES
-        .map(category => ({
-            label: CATEGORY_LABELS[category] ?? category,
-            items: Object.values(KNOWN_SERVICES)
-                .filter(s => s.categories[0] === category && available.has(s.type))
-                .map(s => ({ label: s.displayName, value: s.type })),
-        }))
-        .filter(group => group.items.length > 0);
-});
-
-const filteredFacilities = computed(() => {
-    return sortedFacilities.value.filter(f => {
-        const matchesDesignation = !designationFilter.value ||
-            f.Designations?.some(d => d.type === designationFilter.value);
-        const matchesServices = !serviceFilters.value.length ||
-            serviceFilters.value?.every(service => f.Services?.some(s => s.type === service));
-        return matchesDesignation && matchesServices;
-    });
-});
-
-const designationOptions = computed(() =>
-    availableDesignations.value.map(d => ({ label: d.displayName, value: d.type }))
-);
-
-const cardEls = new Map<string, HTMLElement>();
-const cardScrollEl = ref<HTMLElement | null>(null);
-
-function setCardEl(id: string, el: any) {
-    if (el) cardEls.set(id, el as HTMLElement);
-    else cardEls.delete(id);
-}
-
-watch(filteredFacilities, () => {
-    nextTick(() => {
-        if (cardScrollEl.value && !selectedFacility.value) cardScrollEl.value.scrollLeft = 0;
-    });
-});
-
-watch(selectedFacility, (facility, prevFacility) => {
-    if (prevFacility) {
-        const prev = pinMarkers.get(prevFacility.facility_id!);
-        prev?.getElement()?.classList.remove('facility-pin--selected');
+watch(() => useMapStore().selectedShareId, (newId, prevId) => {
+    if (prevId) {
+        const prev = pinMarkers.get(prevId);
+        prev?.getElement()?.classList.remove('locationshare-pin--selected');
         prev?.setZIndexOffset(0);
     }
-    if (!facility) return;
-    const marker = pinMarkers.get(facility.facility_id!);
-    marker?.getElement()?.classList.add('facility-pin--selected');
+    if (!newId) return;
+    const marker = pinMarkers.get(newId);
+    marker?.getElement()?.classList.add('locationshare-pin--selected');
     marker?.setZIndexOffset(1000);
-    map?.panTo([facility.lat, facility.lon]);
-    nextTick(() => {
-        cardEls.get(facility.facility_id!)?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
-    });
+    // map?.panTo([locationshare.lat, locationshare.lon]);
+    // nextTick(() => {
+    //     cardEls.get(locationshare.location_share_id!)?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    // });
 });
 
-function facilityTime(facility: Facility): string | null {
-    const seconds = pinTimes.value.get(facility.facility_id!);
-    return seconds !== undefined ? formatTime(seconds) : null;
-}
-
-function getDirectionsUrl(facility: Facility): string {
+function getDirectionsUrl(locationshare: LocationShare): string {
     return buildDirectionsUrl(
         settingsStore.localSettings.mapsProvider,
         userPosition.value,
-        { lat: facility.lat, lon: facility.lon },
+        { lat: 0, lon: 0 },
+        // { lat: locationshare.lat, lon: locationshare.lon },
         deviceStore.platform
     );
 }
 
-// Straight-line distances (kept for efficiency/sorting use)
-watch([facilities, lastComputedPosition], ([newFacilities, pos]) => {
-    if (!pos) return;
-    const entries = newFacilities.map((f) => {
-        const dist = distanceInMeters(pos.lat, pos.lon, f.lat, f.lon);
-        return [f.facility_id!, dist] as [string, number];
-    });
-    pinDistances.value = new Map(entries);
-}, { deep: true });
-
-// Driving times via OSRM table API (one request for closest facilities)
-watch([facilities, lastComputedPosition], async ([newFacilities, pos]) => {
-    if (!pos || !newFacilities.length) return;
-
-    // Only compute drive times for the 10 closest facilities by straight-line distance
-    const closest = [...newFacilities]
-        .map(f => ({ f, dist: distanceInMeters(pos.lat, pos.lon, f.lat, f.lon) }))
-        .sort((a, b) => a.dist - b.dist)
-        .slice(0, 10)
-        .map(({ f }) => f);
-
-    const coords = [
-        `${pos.lon},${pos.lat}`,
-        ...closest.map(f => `${f.lon},${f.lat}`),
-    ].join(';');
-    try {
-        const res = await request.get('/facility/route-table', { params: { coords } });
-        const durations: (number | null)[] = res.data.data?.durations?.[0] ?? [];
-        const entries = closest
-            .map((f, i) => [f.facility_id!, durations[i + 1]] as [string, number | null])
-            .filter(([, d]) => d != null) as [string, number][];
-        pinTimes.value = new Map(entries);
-    } catch {
-        // silently ignore OSRM errors
-    }
-}, { deep: true });
-
-watch(lastComputedPosition, async (pos) => {
-    if (!pos) return;
-    const res = await request.get('/facility', { params: { lat: pos.lat, lon: pos.lon } });
-    facilities.value = res.data.data;
-});
+// watch(lastComputedPosition, async (pos) => {
+//     if (!pos) return;
+//     const res = await request.get('/locationshare', { params: { lat: pos.lat, lon: pos.lon } });
+//     shares = res.data.data;
+// });
 
 const mapEl = ref<HTMLElement | null>(null);
 const locationError = ref('');
@@ -218,19 +92,19 @@ const locationError = ref('');
 let map: L.Map | null = null;
 let userMarker: L.Marker | null = null;
 let pinMarkers = new Map<string, L.Marker>();
+let pinApps = new Map<string, ReturnType<typeof createApp>>();
 let watchId: number | null = null;
 
 const newPin = ref<L.LatLng | null>(null);
-const isAddFacilityMode = ref(false);
+const isAddLocationShareMode = ref(false);
 let droppedPin: L.Marker | null = null;
 
-const upsertFacilityModal = ref<InstanceType<typeof UpsertFacilityModal> | null>(null);
+// const upsertLocationShareModal = ref<InstanceType<typeof UpsertLocationShareModal> | null>(null);
 const detailDrawer = ref<InstanceType<typeof NavTriggerDrawer> | null>(null);
 const settingsModal = ref<InstanceType<typeof SettingsDrawerModal> | null>(null);
-const loginModal = ref<InstanceType<typeof LoginModal> | null>(null);
 
-function openFacilityDetail(facility: Facility) {
-    selectedFacilityId.value = facility.facility_id!;
+function openLocationShareDetail(locationshare: LocationShare) {
+    selectedShareId.value = locationshare.location_share_id!;
     detailDrawer.value?.trigger()?.open();
 }
 
@@ -242,49 +116,49 @@ L.Icon.Default.mergeOptions({
     shadowUrl: new URL('leaflet/dist/images/marker-shadow.png', import.meta.url).href,
 });
 
-onMounted(() => {
+const defaultCities = [
+	{ // Paris
+		"lat": 48.85113008823867,
+		"lng": 2.3493763804435734
+	},
+	{ // london
+		"lat": 51.499463021823225,
+		"lng": -0.13044588267803195
+	},
+	{ // seattle
+		"lat": 47.60269643906755,
+		"lng": -122.33474012464286
+	},
+	{ // pheonix
+		"lat": 33.46502912845904,
+		"lng": -112.07736968994142
+	}
+]
+
+onMounted(async () => {
     if (!mapEl.value) return;
 
-    map = L.map(mapEl.value, { zoomControl: false }).setView([INIT_LOCATION.lat, INIT_LOCATION.lon], 11);
-    L.control.zoom({ position: 'topright' }).addTo(map);
+	const defaultLocationIdx = Math.floor(Math.random() * defaultCities.length);
+	const startLoc = defaultCities[defaultLocationIdx] || { let: 0, lng: 0 };
+
+    map = L.map(mapEl.value, { zoomControl: false }).setView([startLoc.lat, startLoc.lng], 11);
+    // L.control.zoom({ position: 'topright' }).addTo(map);
 
     // CartoDB Voyager — road hierarchy with color distinctions, no API key required
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
-        subdomains: 'abcd',
+    L.tileLayer('https://tiles.stadiamaps.com/tiles/osm_bright/{z}/{x}/{y}{r}.png', {
+		attribution: '&copy; <a href="https://stadiamaps.com/attribution/" target="_blank">Stadia Maps</a>, &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
         maxZoom: 19,
     }).addTo(map);
 
-    renderPins();
-    startWatchingUser();
+	await useShareStore().loadShares();
 
-	// initialize default pin location
-	lastComputedPosition.value = { ...INIT_LOCATION };
-
-    map.on('click', (e: L.LeafletMouseEvent) => {
-        if (!isAddFacilityMode.value && !newPin.value) return;
-        placeNewFacilityPin(e.latlng);
+	map.on('click', (e: L.LeafletMouseEvent) => {
+        // if (!isAddLocationShareMode.value && !newPin.value) return;
+		useMapStore().selectShare(null);
+		router.push('/');
     });
 
-    const RecenterControl = L.Control.extend({
-        onAdd() {
-            const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
-            const btn = L.DomUtil.create('a', 'leaflet-bar-part', container) as HTMLAnchorElement;
-            btn.title = 'Center on my location';
-            btn.href = '#';
-            btn.style.display = 'flex';
-            btn.style.alignItems = 'center';
-            btn.style.justifyContent = 'center';
-            btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>`;
-            L.DomEvent.on(btn, 'click', (e) => {
-                L.DomEvent.preventDefault(e);
-                L.DomEvent.stopPropagation(e);
-                centerOnUser();
-            });
-            return container;
-        },
-    });
-    new RecenterControl({ position: 'topright' }).addTo(map);
+	startWatchingUser();
 });
 
 onBeforeUnmount(() => {
@@ -292,48 +166,58 @@ onBeforeUnmount(() => {
     map?.remove();
 });
 
-watch([facilities, pinDistances, pinTimes, designationFilter, serviceFilters], renderPins, { deep: true });
+watch(() => [shares, designationFilter.value, serviceFilters.value], renderPins, { deep: true });
+watch(() => useMapStore().centerCoords, (coords) => {
+	if (coords) {
+		map?.setView(coords)
+	}
+})
 
 function renderPins() {
     if (!map) return;
     pinMarkers.forEach(m => m.remove());
+    pinApps.forEach(m => m.unmount());
     pinMarkers = new Map();
+    pinApps = new Map();
 
-    const filteredIds = new Set(filteredFacilities.value.map(f => f.facility_id!));
+    // const filteredIds = new Set(filteredShares.value.map(f => f.location_share_id!));
     const hasActiveFilter = designationFilter.value !== null || serviceFilters.value.length > 0;
 
-    for (const pin of facilities.value) {
-        const timeSeconds = pinTimes.value.get(pin.facility_id!);
-        const timeLabel = timeSeconds !== undefined ? formatTime(timeSeconds) : '';
-		const isSelected = selectedFacility.value?.facility_id === pin.facility_id;
-        const isSubdued = isAddFacilityMode.value || (hasActiveFilter && !filteredIds.has(pin.facility_id!));
+    for (const share of useShareStore().sharedToDevice) {
+		if (!share.lastPos) { continue; }
+
+		const pinId =  'locationshare-pin' + share.location_share_id;
+
+		const isSelected = selectedShare.value?.location_share_id === share.location_share_id;
+        const isSubdued = false;
+        // const isSubdued = isAddLocationShareMode.value || (hasActiveFilter && !filteredIds.has(pin.location_share_id!));
         const icon = L.divIcon({
-            className: '',
-            html: /* html */`
-				<div class="facility-pin${isSubdued ? ' facility-pin--subdued' : ''}">
-					<div class="facility-pin-icon">🏥</div>
-					<div class="facility-pin-label">
-						<div class="w-full text-ellipsis">${pin.name}</div>
-						${timeLabel ? `<span class="facility-pin-dist">${timeLabel}</span>` : ''}
-					</div>
-				</div>`,
-            iconSize: [24, 48],
-            iconAnchor: [12, 12],
-            popupAnchor: [0, -14],
+			className: '',
+            html: /* html */`<div id="${pinId}"></div>`,
         });
-        const marker = L.marker([pin.lat, pin.lon], { icon, zIndexOffset: isSubdued ? -100 : 0 });
+        const marker = L.marker([share.lastPos?.coords.lat, share.lastPos?.coords.lng], { icon, zIndexOffset: isSubdued ? -100 : 0 });
         marker.on('click', () => {
-            if (isAddFacilityMode.value) return;
 			if (!isSubdued) {
-				selectedFacilityId.value = pin.facility_id!;
-				clearNewPin();
+				useMapStore().selectShare(share.location_share_id);
 			}
         });
+
+		marker.on('add', function() {
+			// 1. Get the container element reference
+			const rootElement = document.getElementById(pinId);
+
+			if (!rootElement) return;
+			
+			// 2. Mount Vue into that container
+			const app = createApp(SharePin, { share });
+			app.mount(rootElement);
+			pinApps.set(share.location_share_id, app);
+		});
+
         marker.addTo(map);
-        pinMarkers.set(pin.facility_id!, marker);
+        pinMarkers.set(share.location_share_id!, marker);
         if (isSelected) {
             nextTick(() => {
-                marker.getElement()?.classList.add('facility-pin--selected');
                 marker.setZIndexOffset(1000);
             });
         }
@@ -347,15 +231,6 @@ function formatDistance(meters: number): string {
         return `${feet} ft`;
     }
     return `${miles.toFixed(1)} mi`;
-}
-
-function formatTime(seconds: number): string {
-    const minutes = Math.round(seconds / 60);
-    if (minutes < 1) return '< 1 min';
-    if (minutes < 60) return `${minutes} min`;
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    return mins > 0 ? `${hours} h ${mins} min` : `${hours} h`;
 }
 
 function centerOnUser() {
@@ -372,66 +247,24 @@ function centerOnUser() {
     }
 }
 
-function clearNewPin() {
-    droppedPin?.remove();
-    droppedPin = null;
-    newPin.value = null;
-}
+function handleLocationUpdate(pos: GeolocationPosition) {
+	console.log(pos);
+	locationError.value = '';
+	const { latitude, longitude } = pos.coords;
 
-function startAddFacilityMode() {
-    isAddFacilityMode.value = true;
-    selectedFacilityId.value = null;
-	renderPins();
-}
+	userPosition.value = { lat: latitude, lon: longitude };
 
-function cancelAddFacilityMode() {
-    isAddFacilityMode.value = false;
-    clearNewPin();
-	renderPins();
+	if (!userMarker) {
+		const userIcon = L.divIcon({
+			className: '',
+			html: /* html */`<div class="user-location-marker"><div class="user-location-pulse"></div><div class="user-location-dot"></div></div>`,
+		});
+		userMarker = L.marker([latitude, longitude], { icon: userIcon }).addTo(map!);
+	} else {
+		userMarker.setLatLng([latitude, longitude]);
+	}
 }
-
-function placeNewFacilityPin(latlng: L.LatLng) {
-    selectedFacilityId.value = null;
-    if (droppedPin) droppedPin.remove();
-    newPin.value = latlng;
-    droppedPin = L.marker(latlng).addTo(map!);
-}
-
-function createFacility() {
-    if (!newPin.value) return;
-    upsertFacilityModal.value?.open({ lat: newPin.value.lat, lon: newPin.value.lng });
-}
-
-function editFacility(facility: Facility) {
-    upsertFacilityModal.value?.open(facility);
-}
-
-async function onFacilitySaved(facility: Facility) {
-    const res = await request.post('/admin/facility', facility);
-    if (facility.facility_id) {
-        const idx = facilities.value.findIndex(f => f.facility_id === facility.facility_id);
-        if (idx !== -1) facilities.value[idx] = res.data.data;
-    } else {
-        facilities.value.push(res.data.data);
-        cancelAddFacilityMode();
-    }
-}
-
-async function onFacilityDeleted(facilityId: string) {
-    await request.delete(`/admin/facility/${facilityId}`);
-    facilities.value = facilities.value.filter(f => f.facility_id !== facilityId);
-    if (selectedFacilityId.value === facilityId) {
-        selectedFacilityId.value = null;
-        detailDrawer.value?.trigger()?.close();
-    }
-}
-
-function designationLabel(d: { type: string; level?: number | null }): string {
-    const def = KNOWN_DESIGNATIONS[d.type];
-    if (!def) return d.type;
-    const levelLabel = d.level != null ? def.levels[d.level]?.label : undefined;
-    return levelLabel ? `${def.displayName} ${levelLabel}` : def.displayName;
-}
+const bounceLocationUpdate = debounce(handleLocationUpdate, time(1, 'minute').ms, { doFirst: true, allowInterval: true });
 
 function startWatchingUser() {
     if (!navigator.geolocation) {
@@ -439,41 +272,28 @@ function startWatchingUser() {
         return;
     }
 
+	// start map at user location
+	navigator.geolocation.getCurrentPosition(position => {
+		console.log(position);
+		const { latitude, longitude } = position.coords;
+		map!.setView([latitude, longitude], 13);
+	})
+
+	// periodically update user location
     watchId = navigator.geolocation.watchPosition(
-        (pos) => {
-            locationError.value = '';
-            const { latitude, longitude } = pos.coords;
-
-            userPosition.value = { lat: latitude, lon: longitude };
-
-            // Only trigger expensive recomputations once the user has moved meaningfully
-            const prev = lastComputedPosition.value;
-            if (!prev || distanceInMeters(prev.lat, prev.lon, latitude, longitude) >= OSRM_UPDATE_THRESHOLD_METERS) {
-                lastComputedPosition.value = { lat: latitude, lon: longitude };
-            }
-
-            if (!userMarker) {
-                const userIcon = L.divIcon({
-                    className: '',
-                    html: /* html */`<div class="user-location-marker"><div class="user-location-pulse"></div><div class="user-location-dot"></div></div>`,
-                    iconSize: [20, 20],
-                    iconAnchor: [10, 10],
-                });
-                userMarker = L.marker([latitude, longitude], { icon: userIcon }).addTo(map!);
-
-                if (props.followUser) {
-                    map!.setView([latitude, longitude], 13);
-                }
-            } else {
-                userMarker.setLatLng([latitude, longitude]);
-            }
-        },
+        bounceLocationUpdate,
         (err) => {
             locationError.value = `Location unavailable: ${err.message}`;
         },
         { enableHighAccuracy: true }
     );
 }
+
+defineExpose({
+	map,
+	centerOnUser,
+})
+
 </script>
 
 
@@ -481,219 +301,20 @@ function startWatchingUser() {
     <div class="map-wrapper">
         <div ref="mapEl" class="map-container" />
         <div v-if="locationError" class="location-error">{{ locationError }}</div>
-        <div v-if="!isAddFacilityMode" class="top-left-buttons">
-            <Button
-                v-if="isAdmin"
-                label="Add Facility"
-                icon="pi pi-plus"
-                severity="contrast"
-                @click="startAddFacilityMode"
-            />
-            <Button
-                v-if="!isLoggedIn"
-                label="Login"
-                severity="contrast"
-                @click="() => loginModal?.open()"
-            />
-            <Button
-                icon="pi pi-cog"
-                text
-                rounded
-                aria-label="Settings"
-				size="large"
-                @click="settingsModal?.open()"
-            />
-        </div>
-        <div v-if="isAddFacilityMode" class="new-facility-bar">
-			<template v-if="newPin">
-				<span class="new-facility-coords">{{ newPin.lat.toFixed(5) }}, {{ newPin.lng.toFixed(5) }} · </span>
-				<button class="new-facility-btn" @click="createFacility">+ Create Facility Here</button>
-			</template>
-			<template v-else>Tap to set a new location</template>
-            <button class="new-facility-cancel" @click="cancelAddFacilityMode" aria-label="Cancel">✕</button>
-        </div>
-        <Transition name="card-tray">
-            <div v-if="!newPin && !isAddFacilityMode && sortedFacilities.length" class="facility-card-tray p-3 flex flex-column gap-1">
-				<div class="flex gap-2 flex-wrap">
-					<Select
-						v-if="availableDesignations.length" 
-						v-model="designationFilter"
-						:options="designationOptions"
-						option-label="label"
-						option-value="value"
-						placeholder="Designation"
-						show-clear
-						data-testid="designation-filter-select"
-					/>
-					<MultiSelect
-						v-if="availableServices.length"
-						v-model="serviceFilters"
-						:options="serviceOptions"
-						option-label="label"
-						option-value="value"
-						option-group-label="label"
-						option-group-children="items"
-						:show-toggle-all="false"
-						placeholder="Services"
-						style="max-width: 220px"
-						data-testid="service-filter-select"
-					/>
-					<Button
-						v-if="designationFilter || serviceFilters.length"
-						class="clear-filters-btn"
-						@click="() => { designationFilter = null; serviceFilters = []; }"
-						data-testid="clear-filters-btn"
-						icon="pi pi-times"
-						label="Clear"
-						text
-					/>
-				</div>
-                <div ref="cardScrollEl" class="facility-card-scroll flex gap-2">
-                    <div
-                        v-for="facility in filteredFacilities"
-                        :key="facility.facility_id"
-                        :ref="(el: any) => setCardEl(facility.facility_id!, el)"
-                        class="facility-card-item flex flex-column"
-                        :class="{ 'facility-card-item--selected': selectedFacilityId === facility.facility_id }"
-                        @click="selectedFacilityId = facility.facility_id!"
-                    >
-                        <div class="facility-card-item-name">{{ facility.name }}</div>
-                        <div v-if="facility.Designations?.length" class="facility-card-item-designations">
-                            <Tag
-                                v-for="d in facility.Designations"
-                                :key="d.facility_designation_id ?? d.type"
-                                :value="designationLabel(d)"
-                                severity="warn"
-                            />
-                        </div>
-                        <div v-if="pinTimes.get(facility.facility_id!)" class="facility-card-item-time">
-                            🕐 {{ formatTime(pinTimes.get(facility.facility_id!)!) }}
-                        </div>
-                        <div class="flex-grow-1"></div>
-                        <div class="facility-card-item-actions">
-                            <a
-                                v-if="facility.phone"
-                                :href="useUserStore().hasAuth ? ('tel:' + facility.phone) : undefined"
-								@click.stop="() => useUserStore().hasAuth ? undefined : loginModal?.open()"
-                                class="facility-card-btn facility-card-btn--call"
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.68 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.59 1.17h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.73a16 16 0 0 0 6.29 6.29l1.13-.92a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-                                Call
-                            </a>
-                            <a
-                                :href="getDirectionsUrl(facility)"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                class="facility-card-btn facility-card-btn--directions"
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
-                                Directions
-                            </a>
-                            <button
-                                data-testid="facility-details-btn"
-                                class="facility-card-btn facility-card-btn--details"
-                                @click.stop="openFacilityDetail(facility)"
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                                Details
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </Transition>
     </div>
-    
-	<UpsertFacilityModal ref="upsertFacilityModal" @save="onFacilitySaved" @delete="onFacilityDeleted" />
-    
-	<NavTriggerDrawer
-        ref="detailDrawer"
-        trigger-key="facility-detail"
-        :width="28"
-    >
-		<template #title>{{ selectedFacility?.name }}</template>
-        <template v-if="selectedFacility">
-            <div class="facility-detail">
-                <div v-if="selectedFacility.Designations?.length" class="facility-detail-section">
-                    <div class="facility-detail-section-label">Designations</div>
-                    <div class="facility-detail-tags">
-                        <Tag
-                            v-for="d in selectedFacility.Designations"
-                            :key="d.facility_designation_id ?? d.type"
-                            :value="designationLabel(d)"
-                            severity="warn"
-                        />
-                    </div>
-                </div>
-
-                <div v-if="selectedFacility.address_1" class="facility-detail-section">
-                    <div class="facility-detail-section-label">Address</div>
-                    <div class="facility-detail-text">
-                        {{ selectedFacility.address_1 }}
-                        <span v-if="selectedFacility.address_2">, {{ selectedFacility.address_2 }}</span>
-                        <br v-if="selectedFacility.city || selectedFacility.state" />
-                        <span v-if="selectedFacility.city">{{ selectedFacility.city }}</span><span v-if="selectedFacility.city && selectedFacility.state">, </span><span v-if="selectedFacility.state">{{ selectedFacility.state }}</span>
-                    </div>
-                </div>
-
-                <div v-if="selectedFacility.phone && useUserStore().hasAuth" class="facility-detail-section">
-                    <div class="facility-detail-section-label">Phone</div>
-                    <a :href="'tel:' + selectedFacility.phone" class="facility-detail-phone">{{ selectedFacility.phone }}</a>
-                </div>
-
-                <div v-if="pinTimes.get(selectedFacility.facility_id!)" class="facility-detail-section">
-                    <div class="facility-detail-section-label">Drive Time</div>
-                    <div class="facility-detail-text">🕐 {{ formatTime(pinTimes.get(selectedFacility.facility_id!)!) }}</div>
-                </div>
-
-                <div v-if="selectedFacility.Services?.length" class="facility-detail-section">
-                    <div class="facility-detail-section-label">Services</div>
-                    <ul class="facility-detail-services">
-                        <li
-                            v-for="s in selectedFacility.Services"
-                            :key="s.facility_service_id ?? s.type"
-                        >
-                            {{ KNOWN_SERVICES[s.type]?.displayName ?? s.type }}
-                        </li>
-                    </ul>
-                </div>
-
-                <div class="facility-detail-actions">
-                    <a
-                        v-if="selectedFacility.phone"
-                        
-						:href="useUserStore().hasAuth ? ('tel:' + selectedFacility.phone) : undefined"
-						@click.stop="() => useUserStore().hasAuth ? undefined : loginModal?.open()"
-                        class="facility-card-btn facility-card-btn--call"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.68 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.59 1.17h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.73a16 16 0 0 0 6.29 6.29l1.13-.92a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-                        Call
-                    </a>
-                    <a
-                        :href="getDirectionsUrl(selectedFacility)"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="facility-card-btn facility-card-btn--directions"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
-                        Directions
-                    </a>
-                    <button
-                        v-if="isAdmin"
-                        data-testid="facility-edit-btn"
-                        class="facility-card-btn facility-card-btn--details"
-                        @click="editFacility(selectedFacility)"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                        Edit
-                    </button>
-                </div>
-            </div>
-        </template>
-    </NavTriggerDrawer>
-    <SettingsDrawerModal ref="settingsModal" />
-	<LoginModal ref="loginModal" />
 </template>
+
+<style>
+.leaflet-control-attribution {
+	position: fixed;
+	top: 0;
+	right: 0;
+}
+
+.share-pin-wrapper {
+	filter: drop-shadow(0 0.05rem 0.1rem #0005);
+}
+</style>
 
 <style scoped lang="scss">
 .map-wrapper {
@@ -721,15 +342,25 @@ function startWatchingUser() {
     pointer-events: none;
 }
 
-.top-left-buttons {
+.nav-bar {
     position: absolute;
-    top: 1rem;
+    bottom: 1rem;
     left: 1rem;
+	right: 1rem;
     z-index: 1000;
+	filter: drop-shadow(0 0.25rem 0.3rem #0005);
 
-	display: flex;
-	align-items: center;
-	gap: 0.5rem;
+	.main {
+		background-color: #fff;
+		border-radius: 50rem;
+	}
+}
+
+.locationshare-pin {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
 }
 
 .new-facility-bar {

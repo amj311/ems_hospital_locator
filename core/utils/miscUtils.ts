@@ -1,5 +1,11 @@
+import type { OneOrMany } from "./typeUtils";
+
 export const peek = <T>(array: T[]): T | undefined => {
 	return !array?.length ? undefined : array[array.length - 1];
+}
+
+export function normalizeToArray<T>(batch: OneOrMany<T>): Array<T> {
+	return Array.isArray(batch) ? batch : [batch];
 }
 
 /**

@@ -1,42 +1,25 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
-import { type User } from "@prisma/client";
-import request from '@/services/request';
 import { AuthService } from '@/services/authService';
+import { StorageKeys, StorageService } from '@/services/StorageService';
+import { type ProfileDetails } from 'core/models/LocationShare';
 
 export const useUserStore = defineStore('user', () => {
 	const hasLoadedSessionData = ref(false);
 	const loginError = ref<String>('');
 	const isAuthenticated = ref(false);
-	const currentUser = ref<any>();
-	const newUserData = ref<any>(null);
-	const session = ref<any>();
+	const deviceId = ref<string>();
 	const isLoading = ref(false);
 
+	AuthService.onLogInOrOut = ({ device_id, sessionToken }) => {
+		deviceId.value = device_id;
+		isAuthenticated.value = Boolean(sessionToken);
+	};
+
 	const loadSessionData = async () => {
-		const authUser = AuthService.authUser;
-		if (!authUser) {
-			isAuthenticated.value = false;
-			currentUser.value = null;
-			hasLoadedSessionData.value = true;
-			isLoading.value = false;
-			return;
-		}
+		isLoading.value = true;
 		try {
-			isLoading.value = true;
-			isAuthenticated.value = Boolean(authUser);
-			if (!isAuthenticated.value) {
-				currentUser.value = null;
-				return;
-			}
-			if (newUserData.value) {
-				await request.put('user/self', newUserData.value);
-				newUserData.value = null;
-			}
-			const { data } = await request.get('user/session');
-			// Push new user details after creating account with email
-			currentUser.value = data.data;
-			session.value = data;
+			await AuthService.doInitAuthFlow(); // attempts session init
 			loginError.value = '';
 		}
 		catch (e) {
@@ -50,39 +33,23 @@ export const useUserStore = defineStore('user', () => {
 		}
 	};
 
-	AuthService.onLogInOrOut = () => {
-		loadSessionData();
-	};
-
-	const setNewUserData = (data) => {
-		newUserData.value = data;
-	};
-	
-	const createUser = async (newUser) => {
-		if (!isAuthenticated.value) {
-			throw Error("There is no active session");
-		}
-		if (currentUser.value) {
-			throw Error("There is already a user for this session");
-		}
-		const { data } = await request.post('signup/create-account', {
-			...newUser,
-			auth_id: AuthService.authUser?.uid,
-			email: AuthService.authUser?.email
-		});
-		currentUser.value = data.data;
-	};
-
+	const profile = ref<ProfileDetails>({});
+	(async () => {
+		profile.value = await StorageService.get<ProfileDetails, ProfileDetails>(StorageKeys.DEVICE_PROFILE, {});
+	})();
 
 	return {
 		hasLoadedSessionData,
 		hasAuth: isAuthenticated,
 		loginError,
-		currentUser,
-		session,
-		setNewUserData,
-		createUser,
+		deviceId,
 		loadSessionData,
 		isLoading,
+
+		profile,
+		async setDeviceProfile(newProfile: ProfileDetails) {
+			await StorageService.set<ProfileDetails>(StorageKeys.DEVICE_PROFILE, newProfile);
+			profile.value = newProfile;
+		}
 	};
 });

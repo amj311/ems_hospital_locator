@@ -1,0 +1,263 @@
+@use './base.css';
+@use 'primeflex/primeflex.css';
+@use "sass:color";
+
+#app {
+	margin: 0 auto;
+	position: fixed;
+	width: 100%;
+	height: 100%;
+}
+
+b,
+.text-bold {
+	font-weight: 600;
+}
+
+.text-semibold {
+	font-weight: 500;
+}
+ 
+a,
+.green {
+	text-decoration: none;
+	color: #4ccd8d;
+	transition: 0.4s;
+}
+
+
+.bg {
+	background-color: var(--color-background);
+}
+
+body.prevent-scroll {
+	overflow: hidden;
+}
+
+body:not(.touch) .hover-show-trigger .hover-show {
+	display: none;
+}
+
+body .hover-show-trigger:hover .hover-show {
+	display: block;
+}
+
+
+
+@media (hover: hover) {
+	a:hover {
+		background-color: hsla(160, 100%, 37%, 0.2);
+	}
+}
+
+.text-ellipsis {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.square {
+	aspect-ratio: 1;
+}
+
+
+
+/* FORM ROWS */
+.details-rows {
+	.row {
+		display: flex;
+		align-items: top;
+		gap: 1rem;
+
+		> label {
+			--width: 7em;
+			--min-height: 2.5rem;
+			min-height: var(--min-height);
+			line-height: var(--min-height);
+			opacity: 0.75;
+			min-width: var(--width);
+			max-width: var(--width);
+		}
+	}
+}
+
+.fill-split-button {
+	transition: max-width 0.2s ease-in-out;
+}
+
+
+
+.absolute-center {
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	translate: -50% -50%;
+}
+
+.text-muted {
+	opacity: .7;
+}
+.text-small {
+	font-size: 0.8em;
+}
+.text-capitalize {
+	text-transform: capitalize;
+}
+
+.text-primary {
+	color: var(--p-primary-color);
+}
+
+.text-upper, .text-upper * {
+	text-transform: uppercase;
+}
+.text-cap, .text-cap * {
+	text-transform: capitalize;
+}
+
+.link {
+	cursor: pointer;
+	text-decoration: none;
+
+	&.primary {
+		color: var(--p-primary-color);
+	}
+
+	&:hover {
+		text-decoration: underline;
+	}
+}
+
+.pi {
+	--p-icon-size: 1em;
+	font-size: inherit;
+}
+
+
+
+.spin {
+	animation: spin 1500ms linear infinite;
+}
+
+@keyframes spin {
+	from {
+		transform: rotate(0deg);
+	}
+
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+
+.material-symbols-outlined {
+	font-size: 1.2em;
+}
+
+
+.no-select {
+	user-select: none;
+}
+
+.square {
+	aspect-ratio: 1;
+}
+
+
+
+.flex-column {
+	display: flex;
+}
+
+.flex-row-center {
+	@extend .flex;
+	@extend .align-items-center;
+}
+
+.flex-col-center-all {
+	@extend .flex;
+	@extend .align-items-center;
+	@extend .justify-content-center;
+}
+
+.flex-row-stretch {
+	@extend .flex;
+	@extend .align-items-stretch;
+}
+
+.flex-col-center {
+	@extend .flex;
+	@extend .flex-column;
+	@extend .align-items-center;
+}
+
+.flex-col-center-all {
+	@extend .flex;
+	@extend .flex-column;
+	@extend .align-items-center;
+	@extend .justify-content-center;
+}
+
+.flex-center-all {
+	@extend .flex;
+	@extend .align-items-center;
+	@extend .justify-content-center;
+}
+
+
+.absolute-full {
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+}
+
+.bg-contain {
+	background-position: center;
+	background-size: contain;
+	background-repeat: no-repeat;
+}
+
+.bg-cover {
+	background-position: center;
+	background-size: contain;
+	background-repeat: no-repeat;
+}
+
+
+.p-drawer {
+	border-radius: 2rem 2rem 0 0;
+}
+
+
+/* --- ENTERING State (New component coming in) --- */
+
+/* Applied during transition (if you need intermediate states) */
+.v-enter-active {
+  transition: all 0.3s ease-out;
+}
+
+/* Applied before mounting (optional, for immediate styling) */
+.v-enter-from {
+  translate: 0 100%;
+//   transform: translateY(20px); /* Example starting point */
+}
+
+/* Fully mounted state */
+.v-enter-to {
+  translate: 0 0;
+//   transform: translateY(0);
+}
+
+/* --- LEAVING State (Old component going out) --- */
+/* Applied during transition */
+.v-leave-active {
+  transition: all 0.3s ease-in;
+}
+
+/* Fully left state */
+.v-leave-to {
+  translate: 0 100%;
+//   transform: translateY(-20px); /* Example ending point */
+}

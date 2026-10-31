@@ -1,6 +1,6 @@
 #!/bin/sh
 
-PROJECT="talaria"
+PROJECT="beacon"
 BACKUP_DIR="/backup-dir/${PROJECT}"
 DB_HOST="db" # Replace with your database host
 DB_PORT="5432" # Replace with your database port

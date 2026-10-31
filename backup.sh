@@ -13,4 +13,4 @@ if [ "$1" = "--remote" ]; then
 	exit $?
 fi
 
-sudo docker exec talaria-backup sh backup.sh
+sudo docker exec beacon-backup sh backup.sh

@@ -18,7 +18,7 @@ DOCKER_HOST=ssh://${SSH_USER}@${SSH_HOST} OSRM_DATA_PATH=${OSRM_DATA_PATH} docke
 
 echo -e "\nCleaning up...\n"
 # Post build cleanup
-DOCKER_HOST=ssh://${SSH_USER}@${SSH_HOST} docker system prune -f --filter "label=com.docker.compose.project=talaria-web" > $OUT
+DOCKER_HOST=ssh://${SSH_USER}@${SSH_HOST} docker system prune -f --filter "label=com.docker.compose.project=beacon-web" > $OUT
 
 echo "Finished!"
 exit 0
