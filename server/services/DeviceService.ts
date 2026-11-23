@@ -1,8 +1,8 @@
 import { prisma } from "../../prisma/client";
 import type { DeviceDb, Challenge, DeviceDraft, Session } from "../../core/models/Device";
 import { randomBytes } from 'node:crypto'
-import { CryptoUtils } from "core/utils/crypto";
-import { time } from "core/utils/timeUtils";
+import { CryptoUtils } from "@core/utils/crypto";
+import { time } from "@core/utils/timeUtils";
 import type { Device } from "@prisma/client";
 
 export const DeviceService = {

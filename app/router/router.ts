@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import MapView from '../views/MapView.vue'
 import HomeView from '@/views/HomeView.vue'
 import SelectedView from '@/views/SelectedView.vue'
+import GeofenceView from '@/views/GeofenceView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -20,7 +21,11 @@ const router = createRouter({
       path: '/select/:share_id',
       name: 'selectedShare',
       component: SelectedView,
-	  props: true,
+    },
+	{
+      path: '/fence',
+      name: 'fence',
+      component: GeofenceView,
     },
     // {
     //   path: '/about',

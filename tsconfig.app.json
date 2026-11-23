@@ -3,6 +3,7 @@
   "include": ["env.d.ts", "app/**/*", "app/**/*.vue", "core", "models", "server", "prisma"],
   "exclude": ["app/**/__tests__/*"],
   "compilerOptions": {
+	"moduleResolution": "bundler",
     "composite": true,
     "baseUrl": ".",
     "noImplicitAny": false,
@@ -10,8 +11,8 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
 	"paths": {
       "@/*": ["./app/*"],
-      "core": ["./core"],
-      "core/*": ["./core/*"],
+      "@core": ["./core"],
+      "@core/*": ["./core/*"],
       "server/*": ["./server/*"],
       "server": ["./server"]
     },

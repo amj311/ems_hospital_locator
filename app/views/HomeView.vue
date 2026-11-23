@@ -13,9 +13,13 @@ import DrawerModal from '@/components/utils/DrawerModal.vue';
 import ProfileAvatar from '@/components/ProfileAvatar.vue';
 import ProfileEditDrawer from '@/components/ProfileEditDrawer.vue';
 import Icon from '@/components/utils/Icon.vue';
-import { onBeforeRouteLeave, useRouter } from 'vue-router';
-import { wait } from 'core/utils/miscUtils';
+import { onBeforeRouteLeave } from 'vue-router';
+import { wait } from '@core/utils/miscUtils';
 import { useMapStore } from '@/stores/map.store';
+import { ago } from '@core/utils/timeUtils';
+import type { HydratedShare } from '@core/models/LocationShare';
+import { reverseGeocode } from '@/utils/reverseGeocode';
+import Async from '@/components/utils/Async.vue';
 
 const userStore = useUserStore();
 const settingsStore = useSettingsStore();
@@ -38,14 +42,19 @@ onBeforeRouteLeave(async () => {
 	isIn.value = false;
 	await wait(300);
 })
-
+async function getCity(share?: HydratedShare) {
+	if (share?.lastPos?.cityString) return share.lastPos.cityString;
+	if (!share?.lastPos) return 'Unknown';
+	const address = await reverseGeocode(share.lastPos);
+	return address?.format('town, state');
+}
 </script>
 
 
 <template>
 	<div class="nav-bar flex-row-center" :class="{ isIn }">
 		<div class="main flex-row-center">
-			<ProfileAvatar class="cursor-pointer ml-2" :profile="useUserStore().profile" :size="2.5" 
+			<ProfileAvatar class="cursor-pointer p-1" :profile="useUserStore().profile" :size="2.5" 
 				@click="() => profileDrawer?.open()"
 			/>
 			<Button
@@ -93,19 +102,19 @@ onBeforeRouteLeave(async () => {
 
 			<Button
 				v-for="share of useShareStore().sharedToDevice"
-				@click="async () => { shareListDrawer?.trigger()?.close(); await wait(100); useMapStore().selectShare(share.location_share_id) }"
+				@click="async () => { shareListDrawer?.trigger()?.close(); await wait(100); useMapStore().selectShare(share.deviceId) }"
 				text
 				severity="secondary"
 				class="w-full justify-content-start"
 			>
 				<ProfileAvatar :profile="share.config.profile" :size="2" />
 				<div class="flex-column align-items-start">
-					<div class="text-xl font-medium">{{ share.config.profile.name || share.to_device_id }}</div>
-					<div class="text-sm">a few minutes ago</div>
+					<div class="text-xl font-medium">{{ share.config.profile?.name || "Device: " + share.deviceId.split('-')[0] }}</div>
+					<div class="text-sm" v-if="share.lastPos">{{ ago(share.lastPos.timestamp) }}</div>
 				</div>
 				<div class="flex-grow-1" />
 				<div>
-					<!-- <Async :load="() => getCity(share.lastPos?.coords)" errorText="Unknown" /> -->
+					<Async :load="() => getCity(share)" errorText="Unknown" />
 				</div>
 			</Button>
 		</DrawerModal>

@@ -18,6 +18,11 @@
     "local-prod": "docker compose -f docker-compose-prod-local.yml up -d --build --force-recreate > /dev/null"
   },
   "dependencies": {
+    "@capacitor-community/sqlite": "^8.1.1",
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/cli": "^8.6.0",
+    "@capacitor/core": "^8.6.0",
+    "@capacitor/geolocation": "^8.2.4",
     "@fastify/cors": "^11.0.1",
     "@fastify/static": "^8.2.0",
     "@noble/ciphers": "^2.4.0",

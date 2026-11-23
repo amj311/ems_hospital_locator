@@ -1,15 +1,17 @@
-import type { Coords } from "core/utils/geoUtils";
-import { time } from "core/utils/timeUtils";
+import type { Coords } from "@core/utils/geoUtils";
+import { time } from "@core/utils/timeUtils";
 
 export const ACTIVE_REQUEST_THRESHOLD_MS = time(1, 'minute').ms;
 
-export type LocationShare = {
+/** Data stored on DB for each connection, one-way */
+export type LocationShareApi = {
     location_share_id:    string,
     from_device_id:    string,
     to_device_id:      string,
-    shared_at_iso:            string, // ISO
-    location?: string | null,
-    updated_at?: string | null,
+	/** Expected to be asc */
+	locationUpdates?: Array<{
+		location: string, // json
+	}>
 };
 
 export type ProfileDetails = {
@@ -24,7 +26,7 @@ export type ProfileDetails = {
 */
 export type LinkedDeviceConfig = {
 	groupKey: string,
-	profile: ProfileDetails,
+	profile?: ProfileDetails | null,
 	/**
 	 * whether it should be represented not as a persons location but a tracked device
 	 */
@@ -32,19 +34,34 @@ export type LinkedDeviceConfig = {
 	// alerts?
 }
 
-export type TimelineNode = {
-	coords: Coords,
-	accuracy_m?: number,
-	speed_mps?: number,
+export type TimelineNode = Coords & {
 	timestamp: number,
-	cityString?: string,
+	/* meters */
+	accuracy?: number | null,
+	/** meters per second */
+	speed?: number | null,
+	cityString?: string | null,
 }
 
-export type HydratedShare = LocationShare & {
+export type EncryptedLocationPayload = {
+	nonce_64url: string,
+	ciphertext_64url: string,
+	keyId: string,
+}
+
+
+/** Data stored on device for each connection */
+export type LinkedDeviceData = {
+	deviceId: string,
 	config: LinkedDeviceConfig,
 	timeline: Array<TimelineNode>,
+	sharingTheirs: boolean,
+	sharingMine: boolean,
+}
+
+export type HydratedShare = LinkedDeviceData & {
+	deviceId: string,
 	lastPos?: TimelineNode,
-	reciprocated?: LocationShare,
 };
 
 
@@ -56,7 +73,7 @@ export type ShareInit = {
 	fromDeviceId: string,
 	fromExchangeKey: string,
 	expiresAt: number,
-	profile: ProfileDetails,
+	profile: ProfileDetails | null,
 }
 
 /**
@@ -72,4 +89,12 @@ export type ShareRequest = {
 		cipher_text: string,
 		nonce: string,
 	}
+}
+
+
+export type Geofence = Coords & {
+	geofence_id: string,
+	/** Meters */
+	radius_m: number,
+	name: string,
 }

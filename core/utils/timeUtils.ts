@@ -26,6 +26,18 @@ export function time(...units: TimeUnitInput) {
 	return new Time(...units);
 }
 
+export function ago(timestamp: number): string {
+	const timeSince = new Date().getTime() - timestamp;
+	if (timeSince < M_MS) return 'a few seconds ago';
+	if (timeSince < M_MS * 5) return 'a few minutes ago';
+	if (timeSince <= H_MS) return Math.floor(timeSince / M_MS) + ' minutes ago';
+	if (timeSince < 2 * H_MS) return Math.floor(timeSince / H_MS) + '1 hour ago';
+	if (timeSince <= D_MS) return Math.floor(timeSince / H_MS) + ' hours ago';
+	if (timeSince < D_MS * 2) return '1 day ago';
+	if (timeSince <= W_MS) return Math.floor(timeSince / D_MS) + ' days ago';
+	return new Intl.DateTimeFormat('en-us', { 'month': 'short', 'day': 'numeric', 'year': 'numeric' }).format(timestamp);
+}
+
 const MS_MS = 1;
 const S_MS = 1000 * MS_MS;
 const M_MS = 60 * S_MS;

@@ -1,18 +1,18 @@
-import type { ShareRequest } from "core/models/LocationShare";
+import type { ShareRequest } from "@core/models/LocationShare";
 import { ShareService } from "server/services/ShareService";
 
 export default (fastify, _, done) => {
 
 	// Get all locations shared to a device
-    fastify.get('/for/:acting_device_id', async (request, reply) => {
-        const { acting_device_id } = request.params;
+    fastify.get('/for/:acting_device_id/:location_since', async (request, reply) => {
+        const { acting_device_id, location_since } = request.params;
 
         if (!acting_device_id) {
             return reply.status(400).send({ success: false, message: 'device_id required' });
         }
 
         try {
-            const sharedToDevice = await ShareService.getSharedWithDevice(acting_device_id);
+            const sharedToDevice = await ShareService.getSharedWithDevice(acting_device_id, location_since);
             const sharedFromDevice = await ShareService.getSharedFromDevice(acting_device_id);
             return { success: true, data: { sharedToDevice, sharedFromDevice } };
         } catch (err) {
@@ -94,9 +94,10 @@ export default (fastify, _, done) => {
 	 * Requests are extremely short lived so this interaction must be instantaneous, and only for one device at a time.
 	 */
 	fastify.post('/approve-request/:acting_device_id/:to_device_id', async (request, reply) => {
+		const location = request.body;
 		try {
 			const { acting_device_id: from_device_id, to_device_id } = request.params;
-			const data = await ShareService.approveShareRequest(from_device_id, to_device_id);
+			const data = await ShareService.approveShareRequest(from_device_id, to_device_id, location);
 			return { success: true, data };
 		}
 		catch (e) {
@@ -120,5 +121,20 @@ export default (fastify, _, done) => {
 		}
 	});
 
+	/**
+	 * Post location
+	 */
+	fastify.post('/location', async (request, reply) => {
+		try {
+			const { acting_device_id, to_device_id, location } = request.body;
+
+			await ShareService.updateLocation(acting_device_id, to_device_id, location);
+			return { success: true };
+		}
+		catch (e) {
+			console.error(e);
+			return reply.status(500).send({ success: false });
+		}
+	});
     done();
 };

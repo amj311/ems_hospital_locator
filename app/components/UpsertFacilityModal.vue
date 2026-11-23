@@ -10,11 +10,11 @@ import InputMask from 'primevue/inputmask';
 import MultiSelect from 'primevue/multiselect';
 import Select from 'primevue/select';
 import Button from 'primevue/button';
-import type { Facility } from 'core/models/Facility';
-import type { FacilityDesignation } from 'core/models/Designation';
-import { KNOWN_DESIGNATIONS } from 'core/models/Designation';
-import type { FacilityService } from 'core/models/Service';
-import { KNOWN_SERVICES, SERVICE_CATEGORIES } from 'core/models/Service';
+import type { Facility } from '@core/models/Facility';
+import type { FacilityDesignation } from '@core/models/Designation';
+import { KNOWN_DESIGNATIONS } from '@core/models/Designation';
+import type { FacilityService } from '@core/models/Service';
+import { KNOWN_SERVICES, SERVICE_CATEGORIES } from '@core/models/Service';
 
 const drawerModal = ref<InstanceType<typeof DrawerModal> | null>(null);
 const isGeocoding = ref(false);

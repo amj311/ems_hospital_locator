@@ -1,7 +1,7 @@
 import request from './request';
 import { CredentialService, type DeviceCredentials } from '@/services/credentialService';
-import { CryptoUtils } from 'core/utils/crypto';
-import type { Challenge, DeviceDraft, Session } from 'core/models/Device';
+import { CryptoUtils } from '@core/utils/crypto';
+import type { Challenge, DeviceDraft, Session } from '@core/models/Device';
 
 // ============================================
 // Device Authentication Credentials
@@ -21,7 +21,6 @@ let deviceSession: Session | null = null;
 async function restoreDeviceState() {
 	const credentials = await CredentialService.loadCredentialsFromStorage();
 	const sessionToken = await CredentialService.loadSessionTokenFromStorage();
-	
 	if (credentials) {
 		deviceCredentials = credentials;
 	}
@@ -97,7 +96,7 @@ export const AuthService = {
 		// The previous registration should be removed first
 		// to mitigate phantom devices.
 		if (await CredentialService.loadCredentialsFromStorage()) {
-			throw new Error("This device is already registered!");
+			throw new Error("This device is already registered! " + JSON.stringify(await CredentialService.loadCredentialsFromStorage()));
 		}
 
 		try {
@@ -130,12 +129,20 @@ export const AuthService = {
 
 			const { device_id } = response.data.data;
 			
-			return this.setDeviceCredentials({
+			await this.setDeviceCredentials({
+				...draft,
+				device_id,
+			});
+
+			// confirm saved!
+			const saved = await this.getDeviceCredentials();
+			if (saved?.device_id !== device_id) throw new Error("DID NOT SAVE!");
+			
+			return await this.setDeviceCredentials({
 				...draft,
 				device_id,
 			});
 		} catch (error: any) {
-			console.error('registerDevice error:', error);
 			throw new Error(error.response?.data?.message || 'Failed to register device');
 		}
 	},
@@ -267,9 +274,9 @@ export const AuthService = {
 	 * Set device credentials (for restoring from secure storage)
 	 * Also persists to localStorage
 	 */
-	setDeviceCredentials(credentials: DeviceCredentials): DeviceCredentials {
+	async setDeviceCredentials(credentials: DeviceCredentials): Promise<DeviceCredentials> {
 		deviceCredentials = credentials;
-		CredentialService.saveCredentialsToStorage(credentials);
+		await CredentialService.saveCredentialsToStorage(credentials);
 		// don't publish auth change here - a session update should follow next
 		return credentials;
 	},
@@ -278,10 +285,10 @@ export const AuthService = {
 	   * Clear device credentials and session
 	   * Also removes from localStorage
 	   */
-	clearDeviceCredentials(): void {
+	async clearDeviceCredentials() {
 		deviceCredentials = null;
 		deviceSession = null;
-		CredentialService.removeCredentialsFromStorage();
+		await CredentialService.removeCredentialsFromStorage();
 		this.publishAuthChanged();
 	},
 

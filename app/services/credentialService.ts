@@ -2,7 +2,7 @@
 // Credential Store
 // ============================================
 
-import type { Session } from "core/models/Device";
+import type { Session } from "@core/models/Device";
 import { StorageKeys, StorageService } from "./StorageService";
 
 /**
@@ -28,6 +28,7 @@ export const CredentialService = {
 			StorageService.set(StorageKeys.DEVICE_CREDENTIALS, credentials);
 		} catch (error) {
 			console.warn('Failed to save credentials to localStorage:', error);
+			throw error;
 		}
 	},
 
@@ -63,6 +64,7 @@ export const CredentialService = {
 			await StorageService.set<Session | null>(StorageKeys.DEVICE_SESSION_TOKEN, session);
 		} catch (error) {
 			console.warn('Failed to save session token to localStorage:', error);
+			throw error;
 		}
 	},
 
@@ -86,6 +88,7 @@ export const CredentialService = {
 			StorageService.delete(StorageKeys.DEVICE_SESSION_TOKEN);
 		} catch (error) {
 			console.warn('Failed to remove session token from localStorage:', error);
+			throw error;
 		}
 	},
 

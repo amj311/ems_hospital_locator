@@ -6,8 +6,8 @@ import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js'
 import { HDKey } from "micro-ed25519-hdkey";
-import type { Challenge } from "core/models/Device";
-import type { ProfileDetails, ShareRequest } from "core/models/LocationShare";
+import type { Challenge } from "@core/models/Device";
+import type { EncryptedLocationPayload, ProfileDetails, ShareRequest, TimelineNode } from "@core/models/LocationShare";
 
 const path = "m/44'/1234'/0'/0'";
 
@@ -73,7 +73,7 @@ export const CryptoUtils = {
 		signature: Bytes
 	): Promise<boolean> {
 		try {
-			
+
 			const valid = ed25519.verify(
 				signature,
 				buildChallengeMessage(challenge),
@@ -124,11 +124,14 @@ export const CryptoUtils = {
 
 	bytesToBase64url: toBase64url,
 	base64urlToBytes: fromBase64url,
-	createGroupKey: createShareRequest,
-	unwrapGroupKey,
+	createShareRequest,
+	unwrapShareRequest,
 	generateVerificationCode,
 	// fromBase64,
 	// toBase64,
+
+	encryptLocation,
+	decryptLocation,
 };
 
 function toBase64url(bytes: Bytes): string {
@@ -162,11 +165,11 @@ function fromBase64url(value: string): Bytes {
 
 function buildChallengeMessage(challenge: Challenge) {
 	return utf8([
-	  "beacon-auth-v1/recover",
-	  challenge.challenge_id,
-	  challenge.nonce,
-	  challenge.device_id,
-	  challenge.expires_at
+		"beacon-auth-v1/recover",
+		challenge.challenge_id,
+		challenge.nonce,
+		challenge.device_id,
+		challenge.expires_at
 	].join("\n"))
 }
 
@@ -189,7 +192,7 @@ function arrayBufferToBase64url(buffer: ArrayBuffer): string {
 const textEncoder = new TextEncoder();
 
 function utf8(value) {
-  return textEncoder.encode(value);
+	return textEncoder.encode(value);
 }
 
 
@@ -204,31 +207,31 @@ function utf8(value) {
  * )
  */
 async function mnemonicToSeed(mnemonic, passphrase = "") {
-  const normalizedMnemonic = mnemonic.normalize("NFKD");
-  const normalizedPassphrase = passphrase.normalize("NFKD");
+	const normalizedMnemonic = mnemonic.normalize("NFKD");
+	const normalizedPassphrase = passphrase.normalize("NFKD");
 
-  const baseKey = await crypto.subtle.importKey(
-    "raw",
-    utf8(normalizedMnemonic),
-    "PBKDF2",
-    false,
-    ["deriveBits"]
-  );
+	const baseKey = await crypto.subtle.importKey(
+		"raw",
+		utf8(normalizedMnemonic),
+		"PBKDF2",
+		false,
+		["deriveBits"]
+	);
 
-  const salt = utf8(`mnemonic${normalizedPassphrase}`);
+	const salt = utf8(`mnemonic${normalizedPassphrase}`);
 
-  const seedBits = await crypto.subtle.deriveBits(
-    {
-      name: "PBKDF2",
-      salt,
-      iterations: 2048,
-      hash: "SHA-512",
-    },
-    baseKey,
-    64 * 8
-  );
+	const seedBits = await crypto.subtle.deriveBits(
+		{
+			name: "PBKDF2",
+			salt,
+			iterations: 2048,
+			hash: "SHA-512",
+		},
+		baseKey,
+		64 * 8
+	);
 
-  return new Uint8Array(seedBits);
+	return new Uint8Array(seedBits);
 }
 
 
@@ -239,6 +242,7 @@ async function mnemonicToSeed(mnemonic, passphrase = "") {
 type CipherPayload = {
 	groupKey64: string,
 	toProfile: ProfileDetails,
+	fromLocation?: TimelineNode | null,
 }
 
 /**
@@ -246,7 +250,7 @@ type CipherPayload = {
  * Encrypts the groupKey specifically for the receiver's publicKey.
  * The "SHARE TO" device creates this after receiving the public key from the "SHARE FROM" device
  */
-async function createShareRequest(selfDeviceId: string, selfPrivateExchangeKey: Bytes, fromPublicExchangeKey: Bytes, toProfile: ProfileDetails): Promise<{ groupKey: string, groupFingerprint: string, request: ShareRequest }> {
+async function createShareRequest(selfDeviceId: string, selfPrivateExchangeKey: Bytes, fromPublicExchangeKey: Bytes, toProfile: ProfileDetails, fromLocation?: TimelineNode | null): Promise<{ groupKey: string, groupFingerprint: string, request: ShareRequest }> {
 	// console.log("createGroupKey", {
 	// 	selfPrivateExchangeKey,
 	// 	fromPublicExchangeKey
@@ -257,7 +261,7 @@ async function createShareRequest(selfDeviceId: string, selfPrivateExchangeKey: 
 	// 1. Generate a Shared Secret via ECDH
 	// This secret is the same for both parties, but cannot be derived by others
 	const sharedSecret = getSharedSecret(selfPrivateExchangeKey, fromPublicExchangeKey);
-  	// console.log({sharedSecret})
+	// console.log({sharedSecret})
 
 	// 2. Use HKDF to derive a high-entropy Wrapping Key from the shared secret
 	// We use a static 'salt' or 'info' string to ensure the key is bound to this purpose
@@ -266,13 +270,14 @@ async function createShareRequest(selfDeviceId: string, selfPrivateExchangeKey: 
 	// 3. Encrypt the groupKey using XChaCha20-Poly1305
 	const nonce = getRandomBytes(24);
 	const xchacha = xchacha20poly1305(wrappingKey, nonce);
-	
+
 	// Associated Data can be the receiver's public key to prevent "misbinding" attacks
 	const selfPublicExchangeKey = x25519.getPublicKey(selfPrivateExchangeKey);
 
 	const cipherPayload: CipherPayload = {
 		groupKey64: toBase64url(groupKey),
 		toProfile,
+		fromLocation,
 	}
 	const ciphertext = xchacha.encrypt(new TextEncoder().encode(JSON.stringify(cipherPayload)));
 
@@ -305,52 +310,51 @@ async function createShareRequest(selfDeviceId: string, selfPrivateExchangeKey: 
  * Decrypts the groupKey using the receiver's privateKey.
  * The "share from" device uses this to derive the groupKey from the payload from the "share to" device
  */
-async function unwrapGroupKey(selfPrivateExchangeKey: Bytes, wrappedPayload: ShareRequest['share_payload']) {
+async function unwrapShareRequest(selfPrivateExchangeKey: Bytes, wrappedPayload: ShareRequest['share_payload']) {
 	const toPublicExchangeKey = fromBase64url(wrappedPayload.to_exchange_key);
-  const nonce = fromBase64url(wrappedPayload.nonce);
-  const ciphertext = fromBase64url(wrappedPayload.cipher_text);
+	const nonce = fromBase64url(wrappedPayload.nonce);
+	const ciphertext = fromBase64url(wrappedPayload.cipher_text);
 	// console.log("unwrap group key", {
 	// 	selfPrivateExchangeKey,
 	// 	toPublicExchangeKey,
 	// 	base64urlPublic: wrappedPayload.toExchangeKey
 	// })
-  // 1. Recreate the exact same Shared Secret
-  const sharedSecret = getSharedSecret(selfPrivateExchangeKey, toPublicExchangeKey);
-//   console.log({sharedSecret})
+	// 1. Recreate the exact same Shared Secret
+	const sharedSecret = getSharedSecret(selfPrivateExchangeKey, toPublicExchangeKey);
+	//   console.log({sharedSecret})
 
-  // 2. Derive the same Wrapping Key using HKDF
-  const wrappingKey = hkdf(sha256, sharedSecret, new Uint8Array(), fromBase64url('groupkeywrap'), 32);
+	// 2. Derive the same Wrapping Key using HKDF
+	const wrappingKey = hkdf(sha256, sharedSecret, new Uint8Array(), fromBase64url('groupkeywrap'), 32);
 
-  // 3. Decrypt and Authenticate
-  const xchacha = xchacha20poly1305(wrappingKey, nonce);
-  
-  try {
-    const deciphered = xchacha.decrypt(ciphertext);
-	const payload = JSON.parse(new TextDecoder().decode(deciphered)) as CipherPayload;
-	return {
-		groupKey: payload.groupKey64,
-		groupFingerprint: generateVerificationCode(fromBase64url(payload.groupKey64)),
-		toProfile: payload.toProfile,
+	// 3. Decrypt and Authenticate
+	const xchacha = xchacha20poly1305(wrappingKey, nonce);
+
+	try {
+		const deciphered = xchacha.decrypt(ciphertext);
+		const payload = JSON.parse(new TextDecoder().decode(deciphered)) as CipherPayload;
+		return {
+			groupFingerprint: generateVerificationCode(fromBase64url(payload.groupKey64)),
+			requestPayload: payload,
+		}
+	} catch (e) {
+		console.error(e)
+		throw new Error("Failed to unwrap key: Invalid keys or tampered payload.");
 	}
-  } catch (e) {
-	console.error(e)
-    throw new Error("Failed to unwrap key: Invalid keys or tampered payload.");
-  }
 }
 
 
 function generateVerificationCode(sharedSecret: Bytes) {
-  // 1. Hash the shared secret to get a fixed-length fingerprint
-  const hash = sha256(sharedSecret);
+	// 1. Hash the shared secret to get a fixed-length fingerprint
+	const hash = sha256(sharedSecret);
 
-  // 2. Convert the first 4 bytes of the hash into a number
-  // This gives us a value between 0 and 4,294,967,295
-  const view = new DataView(hash.buffer);
-  const numericCode = view.getUint32(0);
+	// 2. Convert the first 4 bytes of the hash into a number
+	// This gives us a value between 0 and 4,294,967,295
+	const view = new DataView(hash.buffer);
+	const numericCode = view.getUint32(0);
 
-  // 3. Format as a 6-digit code (modulo 1,000,000)
-  // We pad with leading zeros to ensure it is always 6 digits
-  return (numericCode % 1000000).toString().padStart(6, '0');
+	// 3. Format as a 6-digit code (modulo 1,000,000)
+	// We pad with leading zeros to ensure it is always 6 digits
+	return (numericCode % 1000000).toString().padStart(6, '0');
 }
 
 function getSharedSecret(selfPrivate: Bytes, otherPublic: Bytes) {
@@ -397,153 +401,55 @@ const toPair = {
 // testFlow(fromPair, toPair);
 
 /**
- * USING SHARED SECRET TO ENCRYPT/DECRYPT LOCATION
- */
-
-/**
- * Helper to create a canonical buffer for Associated Data (AD).
- */
-function createAssociatedData(protocolVersion, producerId, recordId, sequence, keyVersion) {
-  const adString = `${protocolVersion}|${producerId}|${recordId}|${sequence}|${keyVersion}`;
-  return new TextEncoder().encode(adString);
-}
-
-/**
  * Web-compatible random bytes generator using window.crypto
  */
 function getRandomBytes(length): Bytes {
 	let hasWindow = false;
 	try {
 		hasWindow = Boolean(window);
-	} catch {};
+	} catch { };
 
 	if (hasWindow)
-  		return window.crypto.getRandomValues(new Uint8Array(length));
+		return window.crypto.getRandomValues(new Uint8Array(length));
 	else {
 		const nodeCrypto = require('node:crypto');
 		return nodeCrypto.randomBytes(length);
 	}
 }
 
-/**
- * Helper to convert Uint8Array to Base64 for JSON transport
- */
-function toBase64(bytes: Bytes) {
-  return btoa(String.fromCharCode(...bytes));
+
+function encryptLocation(groupKey: Bytes, locationPayload: TimelineNode): EncryptedLocationPayload {
+	const plaintext = new TextEncoder().encode(JSON.stringify(locationPayload));
+
+	// Use Web Crypto API for the nonce
+	const nonce = getRandomBytes(24);
+
+	const xchacha = xchacha20poly1305(sha256(groupKey), nonce);
+	const ciphertext = xchacha.encrypt(plaintext);
+
+	return {
+		nonce_64url: toBase64url(nonce),
+		ciphertext_64url: toBase64url(ciphertext),
+		keyId: generateVerificationCode(groupKey),
+	};
 }
 
-/**
- * Helper to convert Base64 back to Uint8Array
- */
-function fromBase64(base64: string) {
-	console.log(base64);
-  return new Uint8Array(atob(base64).split('').map(c => c.charCodeAt(0)));
+function decryptLocation(groupKey: Bytes, payload: EncryptedLocationPayload): TimelineNode | null {
+	const nonce = fromBase64url(payload.nonce_64url);
+	const ciphertext = fromBase64url(payload.ciphertext_64url);
+
+	// use key id as fingerprint to make sure we're decoding a message written with the same key
+	const ourKeyId = generateVerificationCode(groupKey);
+	if (ourKeyId !== payload.keyId) {
+		console.warn("Refused to decrypt a location from a different group key")
+		return null;
+	}
+
+	try {
+		const xchacha = xchacha20poly1305(sha256(groupKey), nonce);
+		const plaintextBytes = xchacha.decrypt(ciphertext);
+		return JSON.parse(new TextDecoder().decode(plaintextBytes));
+	} catch (e) {
+		throw new Error("Decryption failed: Integrity check failed.");
+	}
 }
-
-async function encryptLocation(groupKey: Bytes, locationPayload, metadata) {
-  const protocolVersion = "1.0";
-  const { producerId, recordId, sequence, keyVersion } = metadata;
-
-  const plaintext = new TextEncoder().encode(JSON.stringify(locationPayload));
-  
-  // Use Web Crypto API for the nonce
-  const nonce = getRandomBytes(24); 
-  const ad = createAssociatedData(protocolVersion, producerId, recordId, sequence, keyVersion);
-
-  const xchacha = xchacha20poly1305(groupKey, nonce);
-  const ciphertext = xchacha.encrypt(plaintext, ad);
-
-  return {
-    record_id: recordId,
-    producer_id: producerId,
-    sequence: sequence,
-    created_at: new Date().toISOString(),
-    key_version: keyVersion,
-    nonce: toBase64url(nonce),
-    ciphertext: toBase64url(ciphertext),
-  };
-}
-
-async function decryptLocation(groupKey, record) {
-  const protocolVersion = "1.0";
-  const ad = createAssociatedData(
-    protocolVersion, 
-    record.producer_id, 
-    record.record_id, 
-    record.sequence, 
-    record.key_version
-  );
-
-  const nonce = fromBase64url(record.nonce);
-  const ciphertext = fromBase64url(record.ciphertext);
-
-  try {
-    const xchacha = xchacha20poly1305(groupKey, nonce);
-    const plaintextBytes = xchacha.decrypt(ciphertext, ad);
-    return JSON.parse(new TextDecoder().decode(plaintextBytes));
-  } catch (e) {
-    throw new Error("Decryption failed: Integrity check failed.");
-  }
-}
-
-// // --- Usage in Capacitor/Web ---
-// (async () => {
-//   // Generate a 256-bit group key using Web Crypto
-//   const groupKey = getRandomBytes(32);
-
-//   const locationPayload = {
-//     latitude: 51.5007,
-//     longitude: -0.1246,
-//     accuracy_m: 20,
-//     timestamp: new Date().toISOString()
-//   };
-
-//   const metadata = {
-//     producerId: "user-abc-123",
-//     recordId: "rec-xyz-789",
-//     sequence: 1842,
-//     keyVersion: 3
-//   };
-
-//   try {
-//     const encryptedRecord = await encryptLocation(groupKey, locationPayload, metadata);
-//     console.log("Encrypted Record:", encryptedRecord);
-
-//     const decryptedPayload = await decryptLocation(groupKey, encryptedRecord);
-//     console.log("Decrypted Payload:", decryptedPayload);
-//   } catch (err: any) {
-//     console.error(err.message);
-//   }
-// })();
-
-
-
-
-// const freshKey = x25519.keygen();
-// const freshKey2 = x25519.keygen();
-
-// console.log("CONTROL -----------")
-
-// // console.log(bytesToBase64url(freshKey.publicKey))
-// // console.log(base64urlToBytes(bytesToBase64url(freshKey.publicKey)))
-// // console.log(base64urlToBytes(bytesToBase64url(x25519.getPublicKey(freshKey.secretKey))))
-
-// const wrapControl = await createGroupKey('', freshKey.secretKey, freshKey2.publicKey);
-// console.log(wrapControl);
-// await unwrapGroupKey(freshKey.secretKey, wrapControl.payload);
-
-// console.log("FROM -----------")
-
-// console.log(fromPublicExchangeKey)
-// console.log(base64urlToBytes(fromPublicExchangeKey))
-// console.log(x25519.getPublicKey(base64urlToBytes(fromPrivateExchangeKey)))
-
-// console.log("TO -----------")
-// console.log(fromPublicExchangeKey)
-// console.log(base64urlToBytes(fromPublicExchangeKey))
-// console.log(x25519.getPublicKey(base64urlToBytes(fromPrivateExchangeKey)))
-
-// const wrapped = await createGroupKey(toDeviceId, base64urlToBytes(toPrivateExchangeKey), base64urlToBytes(fromPublicExchangeKey));
-// const unwrapped = await unwrapGroupKey(base64urlToBytes(fromPrivateExchangeKey), wrapped.payload);
-
-// console.log(unwrapped);

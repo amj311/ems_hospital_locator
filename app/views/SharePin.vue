@@ -1,7 +1,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import type { HydratedShare } from 'core/models/LocationShare';
+import type { HydratedShare } from '@core/models/LocationShare';
 import ProfileAvatar from '@/components/ProfileAvatar.vue';
 import { useMapStore } from '@/stores/map.store';
 import { onBeforeRouteUpdate, useRouter} from 'vue-router';
@@ -14,7 +14,7 @@ const size = ref(3);
 const avatarMargin = size.value * 0.05;
 const avatarSize = size.value - (avatarMargin * 2);
 
-const isSelected = computed(() => useMapStore().selectedShareId === props.share?.location_share_id);
+const isSelected = computed(() => useMapStore().selectedShareDeviceId === props.share?.deviceId);
 
 </script>
 

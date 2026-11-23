@@ -6,7 +6,7 @@ import Button from 'primevue/button';
 import InputText from 'primevue/inputtext';
 import { defineStore } from 'pinia';
 import NavTrigger from './NavTrigger/NavTrigger.vue';
-import { wait } from 'core/utils/miscUtils.js';
+import { wait } from '@core/utils/miscUtils.js';
 
 // Define the component using Options API
 const navTriggerRef = ref<InstanceType<typeof NavTrigger> | null>(null);

@@ -22,8 +22,15 @@ const app = Fastify({
 	// https: httpsOptions
 });
 app.register(require('@fastify/cors'), {
-	methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
+	origin: true,
+	methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
 });
+
+// health check
+app.get('/api', (request, reply) => {
+	return ":)";
+})
 
 // Signup routes
 app.register(signupRoute, { prefix: '/signup' });

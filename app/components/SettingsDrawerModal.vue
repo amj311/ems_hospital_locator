@@ -4,6 +4,7 @@ import DrawerModal from './utils/DrawerModal.vue';
 import { useSettingsStore } from '@/stores/settings.store';
 import RadioButton from 'primevue/radiobutton';
 import Button from 'primevue/button';
+import { useGeofenceStore } from '@/stores/geofences.store.js';
 
 const drawerModal = ref<InstanceType<typeof DrawerModal> | null>(null);
 const settingsStore = useSettingsStore();
@@ -27,13 +28,17 @@ function open() {
 }
 
 defineExpose({ open });
+
+
+const fencesModal = ref<InstanceType<typeof DrawerModal> | null>(null);
+
 </script>
 
 <template>
 	<DrawerModal ref="drawerModal" title="Settings" width="28rem">
 		<div class="settings-container flex flex-column gap-4">
 			<div class="maps-provider-section">
-				<h3 class="settings-section-title">Navigation service</h3>
+				<h3 class="settings-section-title mb-3">Navigation service</h3>
 				<div class="flex flex-column gap-3 ml-2">
 					<div class="flex align-items-center">
 						<RadioButton
@@ -62,6 +67,13 @@ defineExpose({ open });
 				</div>
 			</div>
 
+
+			<div class="flex-column">
+				<Button label="Geofences" icon="pi pi-angle-right" iconPos="right" text @click="fencesModal?.trigger()?.open()" />
+			</div>
+
+
+
 			<div class="flex gap-2 justify-content-end">
 				<Button
 					label="Cancel"
@@ -71,6 +83,23 @@ defineExpose({ open });
 				<Button
 					label="Save"
 					@click="handleSave"
+				/>
+			</div>
+		</div>
+	</DrawerModal>
+
+
+	<DrawerModal ref="fencesModal" title="Your Geofences" width="28rem">
+		<div class="settings-container flex flex-column gap-4">
+			<div class="flex flex-column p-3 flex-grow-1 overflow-hidden">
+				<Button v-for="fence in Array.from(Object.values(useGeofenceStore().geofences))" :label="fence.name" text icon="pi pi-angle-right" iconPos="right" @click="() => useGeofenceStore().startEdit(fence)" />
+			</div>
+
+			<div class="flex gap-2 justify-content-end">
+				<Button
+					icon="pi pi-plus"
+					label="New"
+					@click="() => $router.push('fence')"
 				/>
 			</div>
 		</div>

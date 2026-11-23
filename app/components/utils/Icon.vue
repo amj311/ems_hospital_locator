@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { emojis } from '@/utils/icons';
-import { Icons, type IconName, colors, type Icon, type IconIdentifier } from 'core/utils/constants';
+import { Icons, type IconName, colors, type Icon, type IconIdentifier } from '@core/utils/constants';
 import { computed } from 'vue';
 
 const props = defineProps<{

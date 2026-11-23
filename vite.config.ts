@@ -13,7 +13,7 @@ export default defineConfig({
 	resolve: {
 		alias: {
 			'vue': 'vue/dist/vue.esm-bundler.js',
-			'core': fileURLToPath(new URL('./core', import.meta.url)),
+			'@core': fileURLToPath(new URL('./core', import.meta.url)),
 			'@': fileURLToPath(new URL('./app', import.meta.url))
 		}
 	},

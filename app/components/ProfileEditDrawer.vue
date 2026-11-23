@@ -5,8 +5,8 @@ import DrawerModal from './utils/DrawerModal.vue';
 import Icon from './utils/Icon.vue';
 import Button from 'primevue/button';
 import { emojis } from '@/utils/icons.js';
-import type { HydratedShare, ProfileDetails } from 'core/models/LocationShare.js';
-import { jsonCopy } from 'core/utils/miscUtils.js';
+import type { HydratedShare, ProfileDetails } from '@core/models/LocationShare.js';
+import { jsonCopy } from '@core/utils/miscUtils.js';
 import EditProfile from './ProfileEditor.vue';
 import { useUserStore } from '@/stores/user.store.js';
 

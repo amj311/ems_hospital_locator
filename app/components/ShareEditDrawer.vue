@@ -2,9 +2,10 @@
 import { useShareStore } from '@/stores/shares.store';
 import { ref, watch } from 'vue';
 import DrawerModal from './utils/DrawerModal.vue';
-import type { HydratedShare } from 'core/models/LocationShare.js';
-import { jsonCopy } from 'core/utils/miscUtils.js';
+import type { HydratedShare } from '@core/models/LocationShare.js';
+import { jsonCopy } from '@core/utils/miscUtils.js';
 import EditProfile from './ProfileEditor.vue';
+import Button from 'primevue/button';
 
 const drawerModal = ref<InstanceType<typeof DrawerModal> | null>(null);
 
@@ -22,6 +23,7 @@ watch(() => useShareStore().editingShare, (share) => {
 <template>
     <DrawerModal ref="drawerModal" width="28rem" @close="useShareStore().cancelEditShare">
 		<EditProfile v-model="draft.config.profile" />
+		<Button label="Save" @click="async () => { await useShareStore().saveShare(draft); drawerModal?.trigger()?.close(); }" />
 	</DrawerModal>
 
 </template>

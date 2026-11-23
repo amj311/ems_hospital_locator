@@ -1,4 +1,4 @@
-import type { Facility } from "core/models/Facility";
+import type { Facility } from "@core/models/Facility";
 import { FacilityService } from "../services/FacilityService";
 import axios from "axios";
 

@@ -1,15 +1,28 @@
 import axios from "axios";
 import { AuthService } from "./authService";
-import { CryptoUtils } from "core/utils/crypto";
+import { CryptoUtils } from "@core/utils/crypto";
+import { Capacitor } from "@capacitor/core";
 
-const baseURL = window.location.href.includes('localhost:517') ? 'http://localhost:5001/api' : '/api'
+const getBaseURL = () => {
+    // 1. If we are running on a native device (Android/iOS)
+    if (Capacitor.isNativePlatform()) {
+        // REPLACE '192.168.1.XX' with your actual computer IP
+        return 'http://192.168.1.111:5001/api'; 
+    }
 
+    // 2. If we are running in a browser (web dev)
+    return window.location.href.includes(':517') 
+        ? location.href.split(':517')[0] + ':5001/api' 
+        : '/api';
+}
+
+const baseURL = getBaseURL();
 const request = axios.create({
 	baseURL,
 })
 
 request.interceptors.request.use(async (config) => {
-	const token = await CryptoUtils.sha256Hash(AuthService.getValidToken() || '');
+	const token = AuthService.getValidToken() ? await CryptoUtils.sha256Hash(AuthService.getValidToken()!) : null;
 	if (token) {
 		config.headers.Authorization = token;
 	}

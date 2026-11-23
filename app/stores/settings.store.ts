@@ -1,6 +1,6 @@
 import { ref, watch } from 'vue'
 import { defineStore } from 'pinia'
-import type { MapsProvider } from 'core/utils/directionsUtils';
+import type { MapsProvider } from '@core/utils/directionsUtils';
 
 const defaultSettings = {
 	is_tv: false,

@@ -1,15 +1,27 @@
 import { prisma } from "../../prisma/client";
-import { time } from "core/utils/timeUtils";
+import { time } from "@core/utils/timeUtils";
 import type { LocationShare as LocationShareDb } from "@prisma/client";
-import { normalizeToArray } from "core/utils/miscUtils";
-import { ACTIVE_REQUEST_THRESHOLD_MS, type LocationShare, type ShareRequest } from "core/models/LocationShare";
+import { normalizeToArray } from "@core/utils/miscUtils";
+import { ACTIVE_REQUEST_THRESHOLD_MS, type EncryptedLocationPayload, type LocationShareApi, type ShareRequest } from "@core/models/LocationShare";
 
 export const ShareService = {
-	async getSharedWithDevice(device_id: string) {
+	async getSharedWithDevice(device_id: string, locationSince?: string) {
 		const shares = await prisma.locationShare.findMany({
 			where: {
 				to_device_id: device_id,
 				revoked_at: null,
+			},
+			include: {
+				locationUpdates: locationSince ? {
+					where: {
+						timestamp: {
+							gte: new Date(locationSince)
+						},
+					},
+					orderBy: {
+						timestamp: 'asc',
+					}
+				} : true,
 			}
 		})
 		return dbShareToStandardMany(shares);
@@ -31,11 +43,12 @@ export const ShareService = {
 	},
 
 	async initShareRequest(request: ShareRequest) {
-		// abort if a share already exists
+		// abort if active share already exists
 		const approved = await prisma.locationShare.findMany({
 			where: {
 				to_device_id: request.to_device_id,
 				from_device_id: request.from_device_id,
+				revoked_at: null,
 			}
 		});
 		if (approved.length > 0) {
@@ -74,7 +87,7 @@ export const ShareService = {
 		} as unknown as ShareRequest;
 	},
 
-	async approveShareRequest(from_device_id: string, to_device_id: string): Promise<LocationShare> {
+	async approveShareRequest(from_device_id: string, to_device_id: string, location: EncryptedLocationPayload | null) {
 		const request = await prisma.shareRequest.findFirst({
 			where: {
 				from_device_id,
@@ -88,16 +101,88 @@ export const ShareService = {
 			throw new Error('bad request');
 		}
 
-		return dbShareToStandard(await prisma.locationShare.create({
-			data: {
+		// if reciprocated, create other direction as well
+		const shareFromRequester = request.reciprocate ? dbShareToStandard(await prisma.locationShare.upsert({
+			where: {
+				from_device_id_to_device_id: {
+					from_device_id: to_device_id,
+					to_device_id: from_device_id,
+				}
+			},
+			create: {
+				from_device_id: to_device_id,
+				to_device_id: from_device_id,
+				shared_at: new Date(),
+			},
+			update: {
+				shared_at: new Date(),
+				revoked_at: null,
+			}
+		}))! : null;
+
+		const shareFromApprover = dbShareToStandard(await prisma.locationShare.upsert({
+			where: {
+				from_device_id_to_device_id: {
+					from_device_id,
+					to_device_id,
+				}
+			},
+			create: {
 				from_device_id,
 				to_device_id,
 				shared_at: new Date(),
+			},
+			update: {
+				shared_at: new Date(),
+				revoked_at: null,
 			}
-		}))!
+		}))!;
+
+		if (location) {
+			await this.updateLocation(from_device_id, to_device_id, location);
+		}
+
+		return {
+			shareFromRequester,
+			shareFromApprover,
+		}
 	},
 
-	async getApprovedShare(to_device_id: string, from_device_id: string): Promise<LocationShare | null> {
+	async getApprovedShare(to_device_id: string, from_device_id: string) {
+		const shareFromApprover = dbShareToStandard(await prisma.locationShare.findFirst({
+			where: {
+				to_device_id,
+				from_device_id,
+				revoked_at: null,
+			},
+			include: {
+				locationUpdates: {
+					orderBy: {
+						timestamp: 'asc',
+					}
+				},
+			}
+		}));
+
+		if (!shareFromApprover) {
+			return null;
+		}
+
+		const shareFromRequester = dbShareToStandard(await prisma.locationShare.findFirst({
+			where: {
+				to_device_id: from_device_id,
+				from_device_id: to_device_id,
+				revoked_at: null,
+			}
+		}));
+
+		return {
+			shareFromApprover,
+			shareFromRequester,
+		};
+	},
+
+	async updateLocation(from_device_id: string, to_device_id: string, payload: EncryptedLocationPayload) {
 		const share = await prisma.locationShare.findFirst({
 			where: {
 				to_device_id,
@@ -105,16 +190,48 @@ export const ShareService = {
 				revoked_at: null,
 			}
 		});
-		return dbShareToStandard(share);
+
+		if (!share) {
+			throw new Error("No share between devices!");
+		}
+
+		await prisma.locationUpdate.create({
+			data: {
+				location_share_id: share.location_share_id,
+				location: JSON.stringify(payload),
+				timestamp: new Date(),
+			}
+		})
+
+		// only store a limited batch, enough for a sleeping device to catch up when it syncs
+		// doesn't guarantee all devices get all history, just a recent batch when they are active
+		const maxHistory = 20;
+		const oldest = await prisma.locationUpdate.findFirst({
+			where: {
+				location_share_id: share.location_share_id,
+			},
+			orderBy: { timestamp: 'desc' },
+			skip: maxHistory,
+		})
+		if (oldest) {
+			await prisma.locationUpdate.deleteMany({
+				where: {
+					location_share_id: share.location_share_id,
+					timestamp: {
+						gte: oldest.timestamp,
+					}
+				}
+			})
+		}
 	}
 };
 
-function dbShareToStandardMany(shares: Array<NonNullable<LocationShareDb>>): Array<LocationShare> {
+function dbShareToStandardMany(shares: Array<NonNullable<LocationShareDb>>): Array<LocationShareApi> {
 	const batch = normalizeToArray(shares);
 	return batch.map(share => dbShareToStandard(share)!);
 }
 
-function dbShareToStandard(share: LocationShareDb | null): LocationShare | null {
+function dbShareToStandard(share: LocationShareDb | null): LocationShareApi | null {
 	if (!share) {
 		return null;
 	}
@@ -122,8 +239,6 @@ function dbShareToStandard(share: LocationShareDb | null): LocationShare | null 
 		location_share_id: share.location_share_id,
 		from_device_id: share.from_device_id,
 		to_device_id: share.to_device_id,
-		shared_at_iso: share.shared_at.toISOString(),
-		location: share.location,
-		updated_at: share.updated_at?.toISOString(),
+		locationUpdates: (share as any).locationUpdates,
 	}
 }

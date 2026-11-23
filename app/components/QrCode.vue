@@ -3,7 +3,7 @@ import "webrtc-adapter";
 import { onMounted, onBeforeUnmount, reactive, watch, ref, nextTick, computed } from "vue";
 import Button from "primevue/button";
 import { QrcodeStream, QrcodeDropZone, QrcodeCapture } from 'vue-qrcode-reader'
-import { getQrUrl } from "core/utils/qr";
+import { getQrUrl } from "@core/utils/qr";
 
 const { payload } = defineProps<{
 	payload: string,
@@ -28,7 +28,7 @@ watch(() => payload, () => {
 			<img :src="getQrUrl(payload)" class="w-full square" @load="loading = false" />
 			<div class="absolute-full flex-center-all">
 				<div class="square flex-center-all" style="width: 25%; background: #fff; border-radius: 50%;">
-					<slot name="center"><img src="/app/assets/logo-orbit.png" class="p-2"/></slot>
+					<slot name="center"><img src="/app/assets/logo-orbit.png" class="p-2" style="width: 100%" /></slot>
 				</div>
 			</div>
 		</div>

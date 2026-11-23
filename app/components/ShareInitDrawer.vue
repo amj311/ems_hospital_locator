@@ -1,32 +1,29 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { onBeforeUnmount, ref, watch } from 'vue';
 import 'leaflet/dist/leaflet.css';
 import DrawerModal from './utils/DrawerModal.vue';
 import Button from 'primevue/button';
-import type { Facility } from 'core/models/Facility';
+import type { Facility } from '@core/models/Facility';
 import Stepper from 'primevue/stepper';
 import StepPanels from 'primevue/steppanels';
 import StepPanel from 'primevue/steppanel';
 import QrScanner from './QrScanner.vue';
-import { ACTIVE_REQUEST_THRESHOLD_MS, type LocationShare, type ProfileDetails, type ShareInit, type ShareRequest } from 'core/models/LocationShare.js';
+import { ACTIVE_REQUEST_THRESHOLD_MS, type EncryptedLocationPayload, type LocationShareApi, type ProfileDetails, type ShareInit, type ShareRequest, type TimelineNode } from '@core/models/LocationShare.js';
 import request from '@/services/request.js';
-import { CryptoUtils } from 'core/utils/crypto.js';
+import { CryptoUtils } from '@core/utils/crypto.js';
 import { AuthService } from '@/services/authService.js';
 import Message from 'primevue/message';
-import { time } from 'core/utils/timeUtils.js';
+import { time } from '@core/utils/timeUtils.js';
 import InputText from 'primevue/inputtext';
 import QrCode from './QrCode.vue';
 import { useShareStore } from '@/stores/shares.store.js';
 import { useUserStore } from '@/stores/user.store.js';
 import ProfileAvatar from './ProfileAvatar.vue';
-import { wait } from 'core/utils/miscUtils.js';
+import { peek, wait } from '@core/utils/miscUtils.js';
+import ToggleSwitch from 'primevue/toggleswitch';
+import { pullLocation } from '@core/utils/geoUtils.js';
 
 const drawerModal = ref<InstanceType<typeof DrawerModal> | null>(null);
-
-async function open() {
-    drawerModal.value?.trigger()?.open();
-	startPolling();
-}
 
 defineExpose({ open });
 const emit = defineEmits<{
@@ -34,29 +31,38 @@ const emit = defineEmits<{
     delete: [facilityId: string];
 }>();
 
-const mode = ref<'init' | 'request' | 'complete'>('init');
+const mode = ref<'approve' | 'request' | 'complete'>('approve');
 const step = ref(1);
+
+async function open() {
+	mode.value = 'approve';
+	step.value = 1;
+    drawerModal.value?.trigger()?.open();
+	startPolling();
+}
+
 
 const isConfirming = ref(false);
 const confirmErrorMessage = ref('');
 
-const shareInit = ref<ShareInit>();
+const shareFromPayload = ref<ShareInit>();
+const shareProfile = ref(true);
 
 // Perhaps useful for a cycling qr in the future
 function updateShareInit() {
 	const { device_id, exchange_public_key } = (AuthService.deviceCredentials || {});
-	shareInit.value = {
+	shareFromPayload.value = {
 		role: 'share_init',
 		fromDeviceId: device_id || '',
 		expiresAt: Date.now() + ACTIVE_REQUEST_THRESHOLD_MS,
 		fromExchangeKey: exchange_public_key || '',
-		profile: useUserStore().profile,
+		profile: shareProfile.value ? useUserStore().profile : null,
 	};
 }
 updateShareInit();
 
 // receiving device creates share request
-const reciprocateShare = ref(false);
+const reciprocateShare = ref(true);
 const shareRequest = ref<ShareRequest | null>();
 
 // polling on both ends
@@ -67,13 +73,14 @@ const pollTimedOut = ref(false);
 const pollRequestTimer = ref<ReturnType<typeof setInterval> | null>(null);
 
 function startPolling() {
+	endPolling();
 	pollTimedOut.value = false;
 	pollingStart.value = Date.now();
 	pollRequestTimer.value = setInterval(pollRequests, POLL_INTERVAL_MS);
 }
 async function pollRequests() {
 	// just branch here based on mode
-	if (mode.value === 'init') {
+	if (mode.value === 'approve') {
 		const { data } = await request.get('/shares/poll-request/' + AuthService.deviceCredentials?.device_id, { timeout: 1000 });
 		if (data.data) {
 			endPolling();
@@ -84,7 +91,10 @@ async function pollRequests() {
 		const { data } = await request.get('/shares/poll-approval/' + AuthService.deviceCredentials?.device_id +'/' +shareRequest.value!.from_device_id, { timeout: 1000 });
 		if (data.data) {
 			endPolling();
-			doCompleteAndEdit(data.data, shareInit.value!.profile!);
+			const { shareFromApprover } = data.data;
+			const approverLocation = peek<{ location: string }>(shareFromApprover.locationUpdates)?.location;
+			otherDeviceLocation.value = approverLocation ? CryptoUtils.decryptLocation(CryptoUtils.base64urlToBytes(groupKey.value), JSON.parse(approverLocation)) : undefined;
+			doCompleteAndEdit(data.data);
 		}
 	}
 
@@ -98,8 +108,16 @@ function endPolling(timedOut = false) {
 	pollTimedOut.value = timedOut;
 }
 
+onBeforeUnmount(endPolling);
+
 watch(() => drawerModal.value?.trigger()?.show, (show) => {
 	if (!show) endPolling();
+})
+
+watch(() => shareFromPayload.value, () => {
+	if (pollingStart.value || pollTimedOut.value) {
+		startPolling();
+	}
 })
 
 
@@ -126,11 +144,12 @@ async function moveToCreateRequestPage(initPayload: ShareInit) {
 	isConfirming.value = true;
 
 	try {
-		const wrappedKey = await CryptoUtils.createGroupKey(
+		const wrappedKey = await CryptoUtils.createShareRequest(
 			AuthService.deviceCredentials!.device_id,
 			CryptoUtils.base64urlToBytes(AuthService.deviceCredentials!.exchange_private_key),
 			CryptoUtils.base64urlToBytes(initPayload.fromExchangeKey),
 			useUserStore().profile,
+			reciprocateShare.value ? await pullLocation() : null,
 		);
 		const { data } = await request.post('/shares/init-request', {
 			...wrappedKey.request,
@@ -139,7 +158,7 @@ async function moveToCreateRequestPage(initPayload: ShareInit) {
 			reciprocate: reciprocateShare.value,
 		});
 		if (data.data) {
-			shareInit.value = initPayload;
+			shareFromPayload.value = initPayload;
 			shareRequest.value = data.data;
 			groupKey.value = wrappedKey.groupKey;
 			groupFingerprint.value = wrappedKey.groupFingerprint;
@@ -166,14 +185,15 @@ async function handleFoundRequest(request: ShareRequest) {
 
 	// extract group key
 	try {
-		const key = await CryptoUtils.unwrapGroupKey(
+		const unwrapped = await CryptoUtils.unwrapShareRequest(
 			CryptoUtils.base64urlToBytes(AuthService.deviceCredentials!.exchange_private_key),
 			request.share_payload
 		);
 		shareRequest.value = request;
-		groupKey.value = key.groupKey;
-		groupFingerprint.value = key.groupFingerprint;
-		toProfile.value = key.toProfile;
+		groupKey.value = unwrapped.requestPayload.groupKey64;
+		groupFingerprint.value = unwrapped.groupFingerprint;
+		toProfile.value = unwrapped.requestPayload.toProfile;
+		otherDeviceLocation.value = unwrapped.requestPayload.fromLocation || undefined;
 	}
 	catch (e) {
 		console.error(e);
@@ -193,9 +213,16 @@ async function approveShare() {
 	}
 
 	try {
-		const { data } = await request.post('/shares/approve-request/' + AuthService.deviceCredentials?.device_id + '/' + shareRequest.value!.to_device_id);
+		const location = await pullLocation();
+		const { data } = await request.post(
+			'/shares/approve-request/' + AuthService.deviceCredentials?.device_id + '/' + shareRequest.value!.to_device_id,
+			location ? CryptoUtils.encryptLocation(
+				CryptoUtils.base64urlToBytes(groupKey.value),
+				location,
+			) : null,
+		);
 		if (data.success) {
-			doCompleteAndEdit(data.data, toProfile.value!);
+			doCompleteAndEdit(data.data);
 		}
 	}
 	catch (e) {
@@ -208,15 +235,32 @@ const groupKey = ref('');
 const groupFingerprint = ref('');
 const codeConfirm = ref('');
 const toProfile = ref<ProfileDetails>();
+const otherDeviceLocation = ref<TimelineNode | null>();
 
-function doCompleteAndEdit(locationShare: LocationShare, newProfile: ProfileDetails) {
+async function doCompleteAndEdit({ shareFromApprover, shareFromRequester }) {
+	const otherDeviceId = mode.value === 'approve' ? shareRequest.value!.to_device_id : shareRequest.value!.from_device_id;
+	const shareFromDevice = mode.value === 'approve' ? shareFromApprover : shareFromRequester;
+	const shareToDevice = mode.value === 'approve' ? shareFromRequester : shareFromApprover;
+	await useShareStore().saveNewShare(
+		{
+			deviceId: otherDeviceId,
+			config: {
+				groupKey: groupKey.value,
+				profile: mode.value === 'approve' ? toProfile.value : shareFromPayload.value!.profile,
+			},
+			sharingTheirs: Boolean(shareToDevice),
+			sharingMine: Boolean(shareFromDevice),
+			timeline: otherDeviceLocation.value ? [otherDeviceLocation.value] : [],
+		},
+		shareFromDevice,
+		shareToDevice,
+	);
 	mode.value = 'complete';
 	// hold complete screen for a moment before moving to share edit
 	setTimeout(async () => {
-		await useShareStore().saveNewShare(locationShare, { groupKey: groupKey.value, profile: newProfile });
 		drawerModal.value?.trigger()?.close();
 		await wait(100);
-		useShareStore().beginEditShare(locationShare.location_share_id);
+		useShareStore().beginEditShare(otherDeviceId);
 	}, 1000);
 }
 
@@ -224,14 +268,14 @@ function doCompleteAndEdit(locationShare: LocationShare, newProfile: ProfileDeta
 
 <template>
     <DrawerModal ref="drawerModal" title="New Share" width="28rem">
-		<Stepper v-if="mode === 'init'" :value="step">
+		<Stepper v-if="mode === 'approve'" :value="step">
 			<StepPanels>
 				<StepPanel :value="1">
 					<div class="flex flex-column gap-4">
 						<p>Share your location with this QR code:</p>
 						<div class="square relative">
-							<QrCode :payload="JSON.stringify(shareInit)" :class="{ 'opacity-50': pollTimedOut }">
-								<template #center>
+							<QrCode :payload="JSON.stringify(shareFromPayload)" :class="{ 'opacity-50': pollTimedOut }">
+								<template #center v-if="shareProfile">
 									<ProfileAvatar :profile="useUserStore().profile" :size="5" />
 								</template>
 							</QrCode>
@@ -245,7 +289,10 @@ function doCompleteAndEdit(locationShare: LocationShare, newProfile: ProfileDeta
 								</Message>
 							</div>
 						</div>
-
+						<label class="flex-row-center gap-2" for="shareProfile">
+							<ToggleSwitch binary v-model="shareProfile" @change="updateShareInit" inputId="shareProfile" />
+							<div>Include profile details</div>
+						</label>
 						<Button text icon="pi pi-qrcode" label="Scan a code" @click="() => { endPolling(); mode = 'request' }" />
 					</div>
 				</StepPanel>
@@ -265,9 +312,6 @@ function doCompleteAndEdit(locationShare: LocationShare, newProfile: ProfileDeta
 						<Button text label="Back" @click="step = 1" />
 					</div>
 				</StepPanel>
-				<StepPanel :value="3">
-					
-				</StepPanel>
 			</StepPanels>
 		</Stepper>
 
@@ -278,17 +322,21 @@ function doCompleteAndEdit(locationShare: LocationShare, newProfile: ProfileDeta
 					<div class="flex flex-column gap-4">
 						<p>Scan a QR code to begin location sharing:</p>
 						<QrScanner v-if="step === 1" @detect="handleInitCodes" :loading="isConfirming" />
+						<label class="flex-row-center gap-2" for="reciprocateShare">
+							<ToggleSwitch binary v-model="reciprocateShare" @change="updateShareInit" inputId="reciprocateShare" />
+							<div>Share my location as well</div>
+						</label>
 						<Message v-if="confirmErrorMessage" severity="warn">{{ confirmErrorMessage }}</Message>
-						<Button text label="Back" @click="mode = 'init'" />
+						<Button text label="Back" @click="mode = 'approve'" />
 					</div>
 				</StepPanel>
 				<StepPanel :value="2">
-					<div v-if="shareInit && shareRequest" class="flex flex-column gap-4">
+					<div v-if="shareFromPayload && shareRequest" class="flex flex-column gap-4">
 						<div class="flex-col-center gap-2">
 							<p>Requesting location from</p>
 							<div class="flex-row-center gap-2 font-semibold text-2xl">
-								<ProfileAvatar :profile="shareInit.profile" :size="1.5" />
-								<div>{{ shareInit.profile.name }}</div>
+								<ProfileAvatar :profile="shareFromPayload.profile" :size="1.5" />
+								<div>{{ shareFromPayload.profile?.name || "New device" }}</div>
 							</div>
 						</div>
 						<p>Pairing code:</p>

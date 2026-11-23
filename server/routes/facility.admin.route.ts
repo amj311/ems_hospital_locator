@@ -1,4 +1,4 @@
-import type { Facility } from "core/models/Facility";
+import type { Facility } from "@core/models/Facility";
 import { FacilityService } from "../services/FacilityService";
 
 export default (app, _, done) => {

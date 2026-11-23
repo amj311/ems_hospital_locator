@@ -37,11 +37,10 @@ const cameraDenied = computed(() => scannerError.value?.name === 'NotAllowedErro
 			v-if="showScanner && !cameraDenied"
 			class="absolute-full"
 			:constraints="{
-				facingMode: '',
+				facingMode: 'environment',
 			}"
 			:formats="['qr_code']"
 			@detect="codes => onDetect(codes.map(c => c.rawValue))"
-			:torch="true"
 			@camera-on="() => { loading = false; cameraOn = true; scannerError = null }"
 			@camera-off="() => { loading = false; cameraOn = false }"
 			@error="e => scannerError = e"

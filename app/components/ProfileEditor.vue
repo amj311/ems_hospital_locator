@@ -5,15 +5,15 @@ import DrawerModal from './utils/DrawerModal.vue';
 import Icon from './utils/Icon.vue';
 import Button from 'primevue/button';
 import { emojis } from '@/utils/icons.js';
-import type { ProfileDetails } from 'core/models/LocationShare.js';
-import { jsonCopy } from 'core/utils/miscUtils.js';
+import type { ProfileDetails } from '@core/models/LocationShare.js';
+import { jsonCopy } from '@core/utils/miscUtils.js';
 import InputText from 'primevue/inputtext';
 import IconField from 'primevue/iconfield';
 import InputIcon from 'primevue/inputicon';
 import ProfileAvatar from './ProfileAvatar.vue';
 
 
-const value = defineModel<ProfileDetails>();
+const value = defineModel<ProfileDetails | null | undefined>();
 const draft = ref<ProfileDetails>(jsonCopy(value.value || {}));
 watch(() => draft.value, () => {
 	value.value = jsonCopy(draft.value || {});

@@ -6,7 +6,7 @@ import Button, { type ButtonProps } from 'primevue/button';
 import InputText from 'primevue/inputtext';
 import { defineStore } from 'pinia';
 import DrawerModal from './DrawerModal.vue';
-import type { IconIdentifier } from 'core/utils/constants';
+import type { IconIdentifier } from '@core/utils/constants';
 import Icon from './Icon.vue';
 import SwipeAction from './SwipeAction.vue';
 

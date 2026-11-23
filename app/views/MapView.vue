@@ -6,17 +6,27 @@ import { onMounted, onBeforeUnmount, ref, watch, computed, nextTick, createApp }
 // import UpsertLocationShareModal from '@/components/UpsertLocationShareModal.vue';
 import SettingsDrawerModal from '@/components/SettingsDrawerModal.vue';
 import NavTriggerDrawer from '@/components/utils/NavTrigger/NavTriggerDrawer.vue';
-import { buildDirectionsUrl } from 'core/utils/directionsUtils';
+import { buildDirectionsUrl } from '@core/utils/directionsUtils';
 import { useUserStore } from '@/stores/user.store';
 import { useSettingsStore } from '@/stores/settings.store';
 import { useDeviceStore } from '@/stores/device.store';
-import type { LocationShare } from 'core/models/LocationShare';
+import type { HydratedShare, LocationShareApi, TimelineNode } from '@core/models/LocationShare';
 import { useShareStore } from '@/stores/shares.store';
 import SharePin from '@/views/SharePin.vue';
 import debounce from '@/utils/debounce';
-import { time } from 'core/utils/timeUtils';
+import { time } from '@core/utils/timeUtils';
 import { useMapStore } from '@/stores/map.store';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
+
+import { Geolocation } from '@capacitor/geolocation';
+import { CryptoUtils } from '@core/utils/crypto';
+import { Capacitor } from '@capacitor/core';
+import { StorageKeys, StorageService } from '@/services/StorageService';
+import { distanceInMeters } from '@core/utils/geoUtils';
+import request from '@/services/request';
+import { reverseGeocode } from '@/utils/reverseGeocode';
+import { peek } from '@core/utils/miscUtils';
+import { useGeofenceStore } from '@/stores/geofences.store';
 
 const router = useRouter();
 
@@ -29,8 +39,8 @@ const shares = computed(() => useShareStore().sharedToDevice);
 const userPosition = ref<{ lat: number; lon: number } | null>(null);
 // const lastComputedPosition = ref<{ lat: number; lon: number } | null>(null);
 
-const selectedShareId = ref<string | null>(null);
-const selectedShare = computed(() => shares.value.find(f => f.location_share_id === selectedShareId.value) ?? null);
+// const selectedShareId = ref<string | null>(null);
+// const selectedShare = computed(() => shares.value.find(f => f.deviceId === selectedShareId.value) ?? null);
 const designationFilter = ref<string | null>(null);
 const serviceFilters = ref<string[]>([]);
 
@@ -54,23 +64,70 @@ const sortedShares = computed(() => {
 //     });
 // });
 
-watch(() => useMapStore().selectedShareId, (newId, prevId) => {
+const selectedShareLayer = ref<L.LayerGroup>();
+
+watch(() => useMapStore().selectedShareDeviceId, (newId, prevId) => {
     if (prevId) {
         const prev = pinMarkers.get(prevId);
         prev?.getElement()?.classList.remove('locationshare-pin--selected');
         prev?.setZIndexOffset(0);
+		selectedShareLayer.value?.remove();
     }
     if (!newId) return;
-    const marker = pinMarkers.get(newId);
-    marker?.getElement()?.classList.add('locationshare-pin--selected');
-    marker?.setZIndexOffset(1000);
-    // map?.panTo([locationshare.lat, locationshare.lon]);
-    // nextTick(() => {
-    //     cardEls.get(locationshare.location_share_id!)?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
-    // });
+    drawSelectedShare(newId);
 });
 
-function getDirectionsUrl(locationshare: LocationShare): string {
+function drawSelectedShare(newId: string) {
+	selectedShareLayer.value = L.layerGroup();
+	const marker = pinMarkers.get(newId);
+    marker?.getElement()?.classList.add('locationshare-pin--selected');
+    marker?.setZIndexOffset(1000);
+	const share = shares.value.find(s => s.deviceId === newId);
+	if (!share) return;
+
+	const nodes = share.timeline?.slice(-10) || [];
+	
+	const denoised = nodes.reverse().reduce((selected, n) => {
+		if (!selected.length) {
+			return [n];
+		}
+		const lastSelected = peek(selected)!;
+		const distance = distanceInMeters(n.latitude, n.longitude, lastSelected.latitude, lastSelected.longitude);
+		if (distance > Math.max(lastSelected.accuracy || 50, 100)) {
+			selected.push(n);
+		}
+		return selected;
+	}, [] as Array<TimelineNode>);
+	
+		denoised.forEach((n, i) => {
+		if (i < denoised.length - 1) {
+			const next = denoised[i+1];
+			const line = L.polyline([{lat: n.latitude, lng: n.longitude}, { lat: next.latitude, lng: next.longitude }]);
+			line.addTo(selectedShareLayer.value!);
+		}
+	})
+
+	// draw accuracy circle
+	const circle = L.circle(
+		{ lat: share.lastPos!.latitude, lng: share.lastPos!.longitude },
+		{
+			stroke: false,
+			radius: share.lastPos!.accuracy || 0,
+		}
+	);
+	circle.addTo(selectedShareLayer.value);
+	if (mapInstance) selectedShareLayer.value.addTo(mapInstance);
+} 
+
+onMounted(() => {
+	const router = useRouter();
+	const shareDeviceId = router.currentRoute.value.params.share_id as string;
+	if (shareDeviceId) {
+		drawSelectedShare(shareDeviceId);
+	}
+})
+
+function getDirectionsUrl(locationshare: LocationShareApi): string {
     return buildDirectionsUrl(
         settingsStore.localSettings.mapsProvider,
         userPosition.value,
@@ -89,7 +146,8 @@ function getDirectionsUrl(locationshare: LocationShare): string {
 const mapEl = ref<HTMLElement | null>(null);
 const locationError = ref('');
 
-let map: L.Map | null = null;
+let mapInstance: L.Map;
+let map = ref<L.Map>();
 let userMarker: L.Marker | null = null;
 let pinMarkers = new Map<string, L.Marker>();
 let pinApps = new Map<string, ReturnType<typeof createApp>>();
@@ -103,10 +161,6 @@ let droppedPin: L.Marker | null = null;
 const detailDrawer = ref<InstanceType<typeof NavTriggerDrawer> | null>(null);
 const settingsModal = ref<InstanceType<typeof SettingsDrawerModal> | null>(null);
 
-function openLocationShareDetail(locationshare: LocationShare) {
-    selectedShareId.value = locationshare.location_share_id!;
-    detailDrawer.value?.trigger()?.open();
-}
 
 // Fix Leaflet's broken default icon paths when bundled with Vite
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -141,64 +195,68 @@ onMounted(async () => {
 	const defaultLocationIdx = Math.floor(Math.random() * defaultCities.length);
 	const startLoc = defaultCities[defaultLocationIdx] || { let: 0, lng: 0 };
 
-    map = L.map(mapEl.value, { zoomControl: false }).setView([startLoc.lat, startLoc.lng], 11);
-    // L.control.zoom({ position: 'topright' }).addTo(map);
+	mapInstance = L.map(mapEl.value, { zoomControl: false }).setView([startLoc.lat, startLoc.lng], 11);
+    // L.control.zoom({ position: 'topright' }).addTo(mapInstance);
 
     // CartoDB Voyager — road hierarchy with color distinctions, no API key required
     L.tileLayer('https://tiles.stadiamaps.com/tiles/osm_bright/{z}/{x}/{y}{r}.png', {
 		attribution: '&copy; <a href="https://stadiamaps.com/attribution/" target="_blank">Stadia Maps</a>, &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
         maxZoom: 19,
-    }).addTo(map);
+    }).addTo(mapInstance);
 
 	await useShareStore().loadShares();
+	await useGeofenceStore().loadGeofences();
+	setInterval(useShareStore().loadShares, time(1, 'minute').ms);
 
-	map.on('click', (e: L.LeafletMouseEvent) => {
+	mapInstance.on('click', (e: L.LeafletMouseEvent) => {
         // if (!isAddLocationShareMode.value && !newPin.value) return;
-		useMapStore().selectShare(null);
-		router.push('/');
+		// useMapStore().selectShare(null);
+		// router.push('/');
+		useMapStore().stateHandler?.onClick?.call(null, e);
     });
 
 	startWatchingUser();
+	map.value = mapInstance;
 });
 
 onBeforeUnmount(() => {
     if (watchId !== null) navigator.geolocation.clearWatch(watchId);
-    map?.remove();
+    mapInstance?.remove();
 });
 
 watch(() => [shares, designationFilter.value, serviceFilters.value], renderPins, { deep: true });
 watch(() => useMapStore().centerCoords, (coords) => {
 	if (coords) {
-		map?.setView(coords)
+		mapInstance?.setView({ lat: coords.latitude, lng: coords.longitude })
 	}
 })
 
 function renderPins() {
-    if (!map) return;
+    if (!mapInstance) return;
     pinMarkers.forEach(m => m.remove());
     pinApps.forEach(m => m.unmount());
     pinMarkers = new Map();
     pinApps = new Map();
 
-    // const filteredIds = new Set(filteredShares.value.map(f => f.location_share_id!));
+    // const filteredIds = new Set(filteredShares.value.map(f => f.deviceId!));
     const hasActiveFilter = designationFilter.value !== null || serviceFilters.value.length > 0;
 
     for (const share of useShareStore().sharedToDevice) {
 		if (!share.lastPos) { continue; }
 
-		const pinId =  'locationshare-pin' + share.location_share_id;
+		const pinId =  'locationshare-pin' + share.deviceId;
 
-		const isSelected = selectedShare.value?.location_share_id === share.location_share_id;
+		const isSelected = useMapStore().selectedShareDeviceId === share.deviceId;
         const isSubdued = false;
-        // const isSubdued = isAddLocationShareMode.value || (hasActiveFilter && !filteredIds.has(pin.location_share_id!));
+        // const isSubdued = isAddLocationShareMode.value || (hasActiveFilter && !filteredIds.has(pin.deviceId!));
         const icon = L.divIcon({
 			className: '',
             html: /* html */`<div id="${pinId}"></div>`,
         });
-        const marker = L.marker([share.lastPos?.coords.lat, share.lastPos?.coords.lng], { icon, zIndexOffset: isSubdued ? -100 : 0 });
+        const marker = L.marker([share.lastPos?.latitude, share.lastPos?.longitude], { icon, zIndexOffset: isSubdued ? -100 : 0 });
         marker.on('click', () => {
 			if (!isSubdued) {
-				useMapStore().selectShare(share.location_share_id);
+				useMapStore().selectShare(share.deviceId);
 			}
         });
 
@@ -211,11 +269,11 @@ function renderPins() {
 			// 2. Mount Vue into that container
 			const app = createApp(SharePin, { share });
 			app.mount(rootElement);
-			pinApps.set(share.location_share_id, app);
+			pinApps.set(share.deviceId, app);
 		});
 
-        marker.addTo(map);
-        pinMarkers.set(share.location_share_id!, marker);
+        marker.addTo(mapInstance);
+        pinMarkers.set(share.deviceId!, marker);
         if (isSelected) {
             nextTick(() => {
                 marker.setZIndexOffset(1000);
@@ -234,64 +292,181 @@ function formatDistance(meters: number): string {
 }
 
 function centerOnUser() {
+	if (!mapInstance) return;
+
     if (userMarker) {
-        map!.setView(userMarker.getLatLng(), map!.getZoom());
+        mapInstance.setView(userMarker.getLatLng(), mapInstance.getZoom());
     } else if (!navigator.geolocation) {
         locationError.value = 'Geolocation is not supported by this browser.';
     } else {
         navigator.geolocation.getCurrentPosition(
-            (pos) => map!.setView([pos.coords.latitude, pos.coords.longitude], map!.getZoom()),
+            (pos) => mapInstance!.setView([pos.coords.latitude, pos.coords.longitude], mapInstance!.getZoom()),
             (err) => { locationError.value = `Location unavailable: ${err.message}`; },
             { enableHighAccuracy: true }
         );
     }
 }
 
-function handleLocationUpdate(pos: GeolocationPosition) {
-	console.log(pos);
+async function handleNewLocation(pos: GeolocationPosition) {
 	locationError.value = '';
 	const { latitude, longitude } = pos.coords;
 
 	userPosition.value = { lat: latitude, lon: longitude };
 
-	if (!userMarker) {
-		const userIcon = L.divIcon({
-			className: '',
-			html: /* html */`<div class="user-location-marker"><div class="user-location-pulse"></div><div class="user-location-dot"></div></div>`,
-		});
-		userMarker = L.marker([latitude, longitude], { icon: userIcon }).addTo(map!);
-	} else {
-		userMarker.setLatLng([latitude, longitude]);
+	if (!useMapStore().selectedShareDeviceId) {
+		if (!userMarker) {
+			const userIcon = L.divIcon({
+				className: '',
+				html: /* html */`<div class="user-location-marker"><div class="user-location-pulse"></div><div class="user-location-dot"></div></div>`,
+			});
+			userMarker = L.marker([latitude, longitude], { icon: userIcon }).addTo(mapInstance!);
+		} else {
+			userMarker.setLatLng([latitude, longitude]);
+		}
+	}
+
+	void publishNewLocation(pos);
+}
+const bounceLocationUpdate = debounce(handleNewLocation, time(1, 'minute').ms, { doFirst: true, allowInterval: true });
+
+/**
+ * How far to have moved to count as moving
+ */
+const MOVEMENT_TRIGGER_RADIUS_M = 50;
+const MIN_PUBLISH_INTERVAL = time(1, 'minutes').ms;
+/** For baseline staying up to date. "As of x minutes ago". May be configurable. */
+const REG_PUBLISH_INTERVAL = time(10, 'minutes').ms;
+
+/**
+ * Runs every time the device reports a new location. Saves the location locally and determines whether or not to publish.
+ * @param newPos
+ */
+async function publishNewLocation(newPos: GeolocationPosition) {
+	let shouldPublish = false;
+
+	const lastPublish = await StorageService.get<GeolocationPosition>(StorageKeys.DEVICE_LAST_PUBLISH);
+	// initialize record from storage if not yet
+	// after first successful store this will only be true once on service start
+	if (!lastPublish) {
+		shouldPublish = true;
+	}
+
+	if (lastPublish) {
+		// detect movement based on threshold parameters
+		// consider the very latest record even if it is older
+		const distanceFromRecord = distanceInMeters(newPos.coords.latitude, newPos.coords.longitude, lastPublish.coords.latitude, lastPublish.coords.longitude);
+		const timeFromRecord = newPos.timestamp - lastPublish.timestamp;
+		const moved = distanceFromRecord >= MOVEMENT_TRIGGER_RADIUS_M && timeFromRecord >= MIN_PUBLISH_INTERVAL;
+		const shouldDoRegularUpdate = timeFromRecord >= REG_PUBLISH_INTERVAL;
+		shouldPublish = moved || shouldDoRegularUpdate;
+	}
+	
+	if (!shouldPublish) {
+		return;
+	}
+
+	// confirm successful publish before saving this location
+	try {
+		const payload: TimelineNode = {
+			timestamp: newPos.timestamp,
+			latitude: newPos.coords.latitude,
+			longitude: newPos.coords.longitude,
+			speed: newPos.coords.speed,
+			accuracy: newPos.coords.accuracy,
+			cityString: (await reverseGeocode(newPos.coords))?.format('town, state'),
+		}
+		for (const share of useShareStore().sharedFromDevice) {
+			const encrypted = CryptoUtils.encryptLocation(
+				CryptoUtils.base64urlToBytes(share.config.groupKey),
+				payload,
+			);
+			await request.post('/shares/location', {
+				acting_device_id: useUserStore().deviceId,
+				to_device_id: share.deviceId,
+				location: encrypted,
+			})
+		}
+		await StorageService.set(StorageKeys.DEVICE_LAST_PUBLISH, newPos);
+	}
+	catch (e) {
+		console.error(e);
 	}
 }
-const bounceLocationUpdate = debounce(handleLocationUpdate, time(1, 'minute').ms, { doFirst: true, allowInterval: true });
 
-function startWatchingUser() {
-    if (!navigator.geolocation) {
-        locationError.value = 'Geolocation is not supported by this browser.';
-        return;
-    }
+async function startWatchingUser() {
+	// native version
+	if (Capacitor.isNativePlatform()) {
+		try {
+			// 1. Request and check permissions first
+			const permissions = await Geolocation.checkPermissions();
+			if (permissions.location !== 'granted') {
+				await Geolocation.requestPermissions();
+			}
 
-	// start map at user location
-	navigator.geolocation.getCurrentPosition(position => {
-		console.log(position);
-		const { latitude, longitude } = position.coords;
-		map!.setView([latitude, longitude], 13);
-	})
+			// 2. Get initial position to center the map
+			const position = await Geolocation.getCurrentPosition({
+				enableHighAccuracy: true
+			});
+			
+			const { latitude, longitude } = position.coords;
+			mapInstance!.setView([latitude, longitude], 13);
+			bounceLocationUpdate(position);
 
-	// periodically update user location
-    watchId = navigator.geolocation.watchPosition(
-        bounceLocationUpdate,
-        (err) => {
-            locationError.value = `Location unavailable: ${err.message}`;
-        },
-        { enableHighAccuracy: true }
-    );
+			// 3. Start watching position
+			// The plugin uses a callback function rather than returning a watchId
+			await Geolocation.watchPosition({
+				enableHighAccuracy: true
+			}, (position, err) => {
+				if (err) {
+					locationError.value = `Location unavailable: ${err.message}`;
+					return;
+				}
+				if (position) {
+					bounceLocationUpdate(position);
+				}
+			});
+
+		} catch (e: any) {
+			locationError.value = `Error: ${e.message}`;
+		}
+	}
+   
+	else {
+		if (!navigator.geolocation) {
+			locationError.value = 'Geolocation is not supported by this browser.';
+			return;
+		}
+
+		// start map at user location
+		navigator.geolocation.getCurrentPosition(
+			position => {
+				const { latitude, longitude } = position.coords;
+				mapInstance!.setView([latitude, longitude], 13);
+			},
+			(err) => {
+				locationError.value = `Location unavailable: ${err.message}`;
+			},
+			{ enableHighAccuracy: true },
+		)
+
+		// periodically update user location
+		watchId = navigator.geolocation.watchPosition(
+			bounceLocationUpdate,
+			(err) => {
+				locationError.value = `Location unavailable: ${err.message}`;
+			},
+			{ enableHighAccuracy: true }
+		);
+	}
 }
+
 
 defineExpose({
 	map,
 	centerOnUser,
+	addLayer(l: L.LayerGroup) {
+		l.addTo(mapInstance);
+	}
 })
 
 </script>

@@ -1,30 +1,31 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
-import type { HydratedShare, LocationShare, ProfileDetails, LinkedDeviceConfig, ShareInit, TimelineNode } from 'core/models/LocationShare';
+import type { HydratedShare, LocationShareApi, ProfileDetails, LinkedDeviceConfig, ShareInit, TimelineNode, LinkedDeviceData } from '@core/models/LocationShare';
 import request from '@/services/request';
 import { useUserStore } from './user.store';
-import { peek } from 'core/utils/miscUtils';
+import { peek, wait } from '@core/utils/miscUtils';
 import { StorageKeys, StorageService } from '@/services/StorageService';
-import type { Optional } from 'core/utils/typeUtils';
+import type { Optional } from '@core/utils/typeUtils';
+import { CryptoUtils } from '@core/utils/crypto';
 
-type LinkedDeviceData = {
-	config: LinkedDeviceConfig,
-	timeline: Array<TimelineNode>,
-}
 
 export const useShareStore = defineStore('share', () => {
-	const loadedSharesToDevice = ref<Array<LocationShare>>([]);
-	const loadedSharesFromDevice = ref<Array<LocationShare>>([]);
-	const deviceData = ref<Record<string, LinkedDeviceData>>({});
+	const loadedSharesToDevice = ref<Array<LocationShareApi>>([]);
+	const loadedSharesFromDevice = ref<Array<LocationShareApi>>([]);
 	const isLoading = ref(true);
 
 	const loadShares = async () => {
 		isLoading.value = true;
 		try {
-			const { data } = await request.get('/shares/for/' + useUserStore().deviceId);
+			await loadLinkedDevices();
+			const lastLoad = await StorageService.get(StorageKeys.DEVICE_LAST_LOAD);
+			const { data } = await request.get('/shares/for/' + useUserStore().deviceId + '/' + (lastLoad || '01-01-1990'));
 			if (data.success) {
 				loadedSharesFromDevice.value = data.data.sharedFromDevice;
 				loadedSharesToDevice.value = data.data.sharedToDevice;
+				await syncLinkedDevices();
+				updateHydratedShares();
+				await StorageService.set(StorageKeys.DEVICE_LAST_LOAD, new Date().toISOString());
 			}
 		}
 		catch (e) {
@@ -36,11 +37,70 @@ export const useShareStore = defineStore('share', () => {
 		}
 	};
 
-	async function loadDeviceData(device_id: string): Promise<LinkedDeviceData> {
-		if (deviceData.value[device_id]) return deviceData.value[device_id];
-		const data = await StorageService.get<LinkedDeviceData>(StorageKeys.linkedDeviceData(device_id));
-		deviceData.value[device_id] = data!;
-		return data!;
+	const linkedDevices = ref<Record<string, LinkedDeviceData>>({});
+	
+	async function loadLinkedDevices() {
+		linkedDevices.value = {};
+		let deviceIds = await StorageService.get(StorageKeys.LINKED_DEVICES);
+		if (!deviceIds) {
+			deviceIds = [];
+			await StorageService.set(StorageKeys.LINKED_DEVICES, deviceIds);
+		}
+		await Promise.all(deviceIds.map(async (deviceId) => {
+			const data = await StorageService.get(StorageKeys.linkedDeviceData(deviceId));
+			linkedDevices.value[deviceId] = { deviceId, ...data };
+		}))
+	}
+
+	async function syncLinkedDevices() {
+		for (const deviceId in linkedDevices.value) {
+			// update shared flags based on server data
+			// REQUIRES SERVER DATA SUCCESSFULLY LOADED
+			linkedDevices.value[deviceId].sharingTheirs = loadedSharesToDevice.value.some(share => share.from_device_id === deviceId);
+			linkedDevices.value[deviceId].sharingMine = loadedSharesFromDevice.value.some(share => share.to_device_id === deviceId);
+
+			// if they are no longer sharing with us and we are no longer sharing with them, remove entirely
+			if (!linkedDevices.value[deviceId].sharingTheirs && !linkedDevices.value[deviceId].sharingMine) {
+				delete linkedDevices.value[deviceId];
+				await StorageService.delete(StorageKeys.linkedDeviceData(deviceId));
+				// device id index will be synced at end
+			}
+			else {
+				// if they are no longer sharing with us, delete the history
+				if (!linkedDevices.value[deviceId].sharingTheirs) {
+					linkedDevices.value[deviceId].timeline = [];
+				}
+
+				// if they are sharing with us, update latest position
+				if (linkedDevices.value[deviceId].sharingTheirs) {
+					const latestOnDevice = peek(linkedDevices.value[deviceId].timeline) as TimelineNode;
+					loadedSharesToDevice.value.find(share => share.from_device_id === deviceId)?.locationUpdates?.forEach(update => {
+						const decrypted = CryptoUtils.decryptLocation(
+							CryptoUtils.base64urlToBytes(linkedDevices!.value[deviceId]!.config.groupKey),
+							JSON.parse(update.location),
+						)
+						if (decrypted && decrypted.timestamp > latestOnDevice.timestamp) {
+							linkedDevices.value[deviceId].timeline.push(decrypted);
+						}
+					});
+				}
+				await StorageService.set(StorageKeys.linkedDeviceData(deviceId), linkedDevices.value[deviceId]);
+			}
+		}
+		// CASE: share exists remotely but not on device.
+		// Every share must be written to device when it is approved.
+		// This is essential because the device alone stores the group key.
+		// TODO: a share on remote but not on device needs to be displayed as broken with a flow for fixing.
+
+		await StorageService.set(StorageKeys.LINKED_DEVICES, Array.from(Object.keys(linkedDevices.value)));
+	}
+
+	function getDeviceData(device_id: string): LinkedDeviceData {
+		const data = linkedDevices.value[device_id];
+		if (!data) {
+			throw new Error("No data for that device id");
+		}
+		return data;
 	}
 
 	const testHistory = [{
@@ -51,42 +111,25 @@ export const useShareStore = defineStore('share', () => {
 		timestamp: Date.now(),
 	}];
 
-	// Merge server shares with local config
-	const sharedToDevice = ref<Array<HydratedShare>>([]);
-	watch(() => ({ shares: loadedSharesToDevice.value, data: deviceData.value }), async ({shares}) => {
-		sharedToDevice.value = await Promise.all(shares.map(async share => {
-			const data = await loadDeviceData(share.from_device_id);
-			data.timeline = testHistory;
-			return {
-				...share,
-				...data,
-				lastPos: peek(data.timeline),
-				reciprocated: loadedSharesFromDevice.value.find(sharedFromDevice => share.to_device_id === sharedFromDevice.to_device_id)
-			}
+	const hydratedShares = ref<Array<HydratedShare>>([]);
+	function updateHydratedShares() {
+		hydratedShares.value = Array.from(Object.values(linkedDevices.value)).map(share => ({
+			...share,
+			timeline: share.timeline || testHistory,
+			lastPos: peek(share.timeline || testHistory),
 		}))
-	}, { deep: true });
+	}
 
-	const sharedFromDevice = ref<Array<HydratedShare>>([]);
-	watch(() => ({ shares: loadedSharesFromDevice.value, data: deviceData.value }), async ({shares}) => {
-		sharedFromDevice.value = await Promise.all(shares.map(async share => {
-			const data = await loadDeviceData(share.to_device_id);
-			data.timeline = testHistory;
-			return {
-				...share,
-				...data,
-				lastPos: peek(data.timeline),
-				reciprocated: loadedSharesToDevice.value.find(sharedToDevice => sharedToDevice.from_device_id === share.from_device_id)
-			}
-		}))
-	}, { deep: true });
+	const sharedToDevice = computed(() => hydratedShares.value.filter(share => share.sharingTheirs));
+	const sharedFromDevice = computed(() => hydratedShares.value.filter(share => share.sharingMine));
 
-	const editingShareId = ref('');
+	const editingShareDeviceId = ref('');
 	const editingShare = computed(() => {
-		return sharedToDevice.value.find(s => s.location_share_id === editingShareId.value);
+		return linkedDevices.value[editingShareDeviceId.value];
 	});
 	
 	async function patchDeviceData(other_device_id: string, patchData: Optional<LinkedDeviceData>) {
-		const data = await loadDeviceData(other_device_id);
+		const data = await getDeviceData(other_device_id);
 		// replace old values with the provided new values
 		// leave the original of anything not provided
 		const newData: LinkedDeviceData = {
@@ -96,19 +139,22 @@ export const useShareStore = defineStore('share', () => {
 
 		// also upserts if no record exists yet
 		await StorageService.set(StorageKeys.linkedDeviceData(other_device_id), newData);
-		deviceData.value[other_device_id] = newData;
+		linkedDevices.value[other_device_id] = newData;
+		updateHydratedShares();
 	}
 
 	async function upsertShareConfig(other_device_id: string, config: LinkedDeviceConfig) {
 		await patchDeviceData(other_device_id, { config });
 	}
-	async function saveNewShare(locationShare: LocationShare, newConfig: LinkedDeviceConfig) {
-		const otherDeviceId = locationShare.from_device_id === useUserStore().deviceId
-			? locationShare.to_device_id
-			: locationShare.from_device_id
-		;
-		await upsertShareConfig(otherDeviceId, newConfig);
-		loadedSharesToDevice.value.push(locationShare);
+	async function saveNewShare(newDeviceData: LinkedDeviceData, sharedFromDevice: LocationShareApi | null, sharedToDevice: LocationShareApi | null) {
+		await StorageService.set(StorageKeys.linkedDeviceData(newDeviceData.deviceId), newDeviceData);
+		linkedDevices.value[newDeviceData.deviceId] = newDeviceData;
+		
+		if (sharedToDevice) loadedSharesToDevice.value.push(sharedToDevice);
+		if (sharedFromDevice) loadedSharesFromDevice.value.push(sharedFromDevice);
+		
+		await syncLinkedDevices();
+		updateHydratedShares();
 	}
 
 	return {
@@ -117,11 +163,19 @@ export const useShareStore = defineStore('share', () => {
 		loadShares,
 		isLoading,
 		beginEditShare(shareId) {
-			console.log(shareId)
-			editingShareId.value = shareId;
+			editingShareDeviceId.value = shareId;
 		},
 		cancelEditShare() {
-			editingShareId.value = '';
+			editingShareDeviceId.value = '';
+		},
+		async saveShare(draft: LinkedDeviceData) {
+			if (!editingShareDeviceId.value) return;
+			// only profile is updated right now
+			const data = await getDeviceData(draft.deviceId);
+			data.config.profile = draft.config.profile;
+			await patchDeviceData(draft.deviceId, data);
+			editingShareDeviceId.value = '';
+			await wait(200);
 		},
 		editingShare,
 		upsertShareConfig,

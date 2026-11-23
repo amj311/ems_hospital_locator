@@ -2,7 +2,7 @@ import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import { AuthService } from '@/services/authService';
 import { StorageKeys, StorageService } from '@/services/StorageService';
-import { type ProfileDetails } from 'core/models/LocationShare';
+import { type ProfileDetails } from '@core/models/LocationShare';
 
 export const useUserStore = defineStore('user', () => {
 	const hasLoadedSessionData = ref(false);
@@ -25,7 +25,7 @@ export const useUserStore = defineStore('user', () => {
 		catch (e) {
 			console.log('ERROR LOADING AUTH USER')
 			console.log(e);
-			loginError.value = 'Failed to load user';
+			loginError.value = 'Failed to load user. ' + e;
 		}
 		finally {
 			hasLoadedSessionData.value = true;
@@ -36,6 +36,7 @@ export const useUserStore = defineStore('user', () => {
 	const profile = ref<ProfileDetails>({});
 	(async () => {
 		profile.value = await StorageService.get<ProfileDetails, ProfileDetails>(StorageKeys.DEVICE_PROFILE, {});
+		await loadSessionData();
 	})();
 
 	return {

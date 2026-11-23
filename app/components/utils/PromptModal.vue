@@ -6,8 +6,8 @@ import Button, { type ButtonProps } from 'primevue/button';
 import InputText from 'primevue/inputtext';
 import { defineStore } from 'pinia';
 import DrawerModal from './DrawerModal.vue';
-import { jsonCopy } from 'core/utils/miscUtils';
-import type { Replace } from 'core/utils/typeUtils';
+import { jsonCopy } from '@core/utils/miscUtils';
+import type { Replace } from '@core/utils/typeUtils';
 
 // Define the store as a separate export
 export type PromptOptions = {

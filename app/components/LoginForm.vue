@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { onMounted, ref } from 'vue';
 import 'leaflet/dist/leaflet.css';
 import Button from 'primevue/button';
 import { useUserStore } from '@/stores/user.store.js';
@@ -9,11 +9,11 @@ import StepList from 'primevue/steplist';
 import StepPanels from 'primevue/steppanels';
 import StepPanel from 'primevue/steppanel';
 import Step from 'primevue/step';
-import { CryptoUtils } from 'core/utils/crypto.js';
+import { CryptoUtils } from '@core/utils/crypto.js';
 import Checkbox from 'primevue/checkbox';
 import { useToast } from './utils/Toast.vue';
 import { AuthService } from '@/services/authService.js';
-import { type ProfileDetails } from 'core/models/LocationShare.js';
+import { type ProfileDetails } from '@core/models/LocationShare.js';
 import ProfileEditor from './ProfileEditor.vue';
 
 const userStore = useUserStore();
@@ -54,6 +54,8 @@ const isLoading = ref(false);
 async function registerDevice() {
 	try {
 		isLoading.value = true;
+		console.log("GOING TO REGISTER!!!!!")
+
 		await AuthService.registerDevice(pin.value, mnemonic.value);
 		useToast().add({
 			title: "Device registered!",
@@ -63,7 +65,7 @@ async function registerDevice() {
 		await signinWithPassword();
 	}
 	catch (e) {
-		console.error("Error registering device", e);
+		console.error("Error registering device", JSON.stringify(e));
 		throw new Error("Could not register device")
 	}
 	finally {
@@ -84,8 +86,6 @@ async function signinWithPassword() {
 		isLoading.value = false;
 	}
 };
-
-
 </script>
 
 <template>
@@ -176,7 +176,6 @@ async function signinWithPassword() {
 				</StepList>
 			</Stepper>
 		</div>
-
 	</div>
 </template>
 

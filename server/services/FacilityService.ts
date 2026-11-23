@@ -1,4 +1,4 @@
-import type { Facility } from "core/models/Facility";
+import type { Facility } from "@core/models/Facility";
 import { FacilityDao } from "../data/FacilityDao";
 
 export const FacilityService = {

@@ -1,4 +1,4 @@
-import type { Facility } from "core/models/Facility";
+import type { Facility } from "@core/models/Facility";
 import { prisma } from "../../prisma/client";
 
 export const FacilityDao = {

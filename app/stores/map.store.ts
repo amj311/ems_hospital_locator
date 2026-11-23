@@ -1,27 +1,43 @@
 import { nextTick, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
-import type { Coords } from 'core/utils/geoUtils';
+import type { Coords } from '@core/utils/geoUtils';
 import MapView from '@/views/MapView.vue';
 import { useRouter } from 'vue-router';
 
+type MapStateHandler = {
+	onClick: (e: L.LeafletMouseEvent) => void,
+}
+
 export const useMapStore = defineStore('map', () => {
 	const mapRef = ref<InstanceType<typeof MapView>>();
-	const selectedShareId = ref(location.pathname.split('/select/')[1] || '');
+	const selectedShareDeviceId = ref(location.pathname.split('/select/')[1] || '');
 	const centerCoords = ref<Coords | null>();
 
+	const focusMode = ref(false);
+	const stateHandler = ref<MapStateHandler | null>(null);
+	
 	const router = useRouter();
-	watch(() => router.currentRoute.value?.params.share_id, (share_id) => {
-		selectedShareId.value = share_id as string || '';
+	watch(() => router.currentRoute.value?.params.share_id, (share_device_id) => {
+		selectedShareDeviceId.value = share_device_id as string || '';
 	}, { immediate: true });
 
 	return {
-		map: mapRef,
+		map: mapRef,		
 		setMapRef(map: InstanceType<typeof MapView>) {
 			mapRef.value = map;
 		},
-		selectedShareId,
-		selectShare(id: string | null) {
-			router.push(id ? ('/select/' + id) : '/');
+
+		stateHandler,
+		setHandler(h: MapStateHandler) {
+			stateHandler.value = h;
+		},
+		clearHandler() {
+			stateHandler.value = null;
+		},
+
+		selectedShareDeviceId,
+		selectShare(deviceId: string | null) {
+			router.push(deviceId ? ('/select/' + deviceId) : '/');
 		},
 		centerCoords,
 		async centerOn(coords?: Coords) {
