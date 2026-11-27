@@ -6,7 +6,7 @@ services:
     image: beacon-server
     pull_policy: never
     labels:
-      - "com.docker.compose.project=beacon-web"
+      - "com.docker.compose.project=beacon"
     container_name: beacon-server
     restart: on-failure:max=2
     ports:
@@ -25,7 +25,7 @@ services:
       context: .
       dockerfile: ./Dockerfile.db
     labels:
-      - "com.docker.compose.project=beacon-web"
+      - "com.docker.compose.project=beacon"
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=password
@@ -44,13 +44,13 @@ services:
       context: .
       dockerfile: ./Dockerfile.backup
     labels:
-      - "com.docker.compose.project=beacon-web"
+      - "com.docker.compose.project=beacon"
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=password
       - POSTGRES_DB=beacon
     volumes:
-      - /Users/Arthur/code/beacon-web/backups:/backup-dir
+      - /Users/Arthur/code/beacon/backups:/backup-dir
     depends_on:
       - db
     links:

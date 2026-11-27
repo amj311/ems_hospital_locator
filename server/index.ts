@@ -5,9 +5,8 @@ interface RequestWithSessionUser {
 	sessionUser: any;
 }
 import path from "path";
-import { createReadStream, readFileSync } from "fs";
+import { createReadStream, existsSync, readFileSync } from "fs";
 import sessionAuthMiddleware from "./services/SessionService";
-import signupRoute from "./routes/signup.route";
 
 // HTTPS was only needed for testing with plaid
 // // HTTPS support for development
@@ -32,8 +31,18 @@ app.get('/api', (request, reply) => {
 	return ":)";
 })
 
-// Signup routes
-app.register(signupRoute, { prefix: '/signup' });
+// Serve the APK copied to the production host by deploy.sh.
+app.get('/api/downloads/android/latest', (request, reply) => {
+	const apkPath = process.env.ANDROID_APK_PATH || '/app/downloads/android-latest.apk';
+	if (!existsSync(apkPath)) {
+		return reply.status(404).send({ message: 'Android app download is not available' });
+	}
+
+	return reply
+		.type('application/vnd.android.package-archive')
+		.header('Content-Disposition', 'attachment; filename="beacon-android.apk"')
+		.send(createReadStream(apkPath));
+});
 
 app.addHook('onResponse', (request, reply) => {
 	const sign = reply.statusCode >= 200 && reply.statusCode < 300 ? '✅' : '❌';
@@ -79,8 +88,6 @@ app.register((api, _, done) => {
 				data: {}
 			}
 		});
-
-		api.register(require('./routes/facility.admin.route'), { prefix: '/facility' });
 
 		done();
 	}, { prefix: '/admin' });

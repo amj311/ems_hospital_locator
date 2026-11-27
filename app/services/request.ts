@@ -4,6 +4,11 @@ import { CryptoUtils } from "@core/utils/crypto";
 import { Capacitor } from "@capacitor/core";
 
 const getBaseURL = () => {
+	const configuredBaseURL = import.meta.env.VITE_API_BASE_URL;
+	if (configuredBaseURL) {
+		return configuredBaseURL;
+	}
+
     // 1. If we are running on a native device (Android/iOS)
     if (Capacitor.isNativePlatform()) {
         // REPLACE '192.168.1.XX' with your actual computer IP

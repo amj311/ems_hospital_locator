@@ -1,14 +1,21 @@
 apply plugin: 'com.android.application'
 
+// Set with -PBEACON_API_BASE_URL=<url> (or the matching environment variable).
+def apiBaseUrl = project.findProperty('BEACON_API_BASE_URL') ?: System.getenv('BEACON_API_BASE_URL') ?: 'http://192.168.1.111:5001/api'
+
 android {
     namespace = "com.simplyoliveapps.beacon"
     compileSdk = rootProject.ext.compileSdkVersion
+    buildFeatures {
+        buildConfig = true
+    }
     defaultConfig {
         applicationId "com.simplyoliveapps.beacon"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0"
+        buildConfigField "String", "API_BASE_URL", '"' + apiBaseUrl.toString().replace('\\', '\\\\').replace('"', '\\"') + '"'
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -36,6 +43,12 @@ dependencies {
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
+    implementation 'net.zetetic:sqlcipher-android:4.20.0@aar'
+    implementation 'androidx.sqlite:sqlite:2.7.0'
+    implementation("com.goterl:lazysodium-android:5.2.0") {
+		exclude group: "net.java.dev.jna", module: "jna"
+	}
+	implementation("net.java.dev.jna:jna:5.17.0@aar")
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"

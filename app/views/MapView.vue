@@ -198,9 +198,10 @@ onMounted(async () => {
 	mapInstance = L.map(mapEl.value, { zoomControl: false }).setView([startLoc.lat, startLoc.lng], 11);
     // L.control.zoom({ position: 'topright' }).addTo(mapInstance);
 
-    // CartoDB Voyager — road hierarchy with color distinctions, no API key required
-    L.tileLayer('https://tiles.stadiamaps.com/tiles/osm_bright/{z}/{x}/{y}{r}.png', {
-		attribution: '&copy; <a href="https://stadiamaps.com/attribution/" target="_blank">Stadia Maps</a>, &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    const mapsUrl = Capacitor.isNativePlatform() ? 'https://tiles.stadiamaps.com/tiles/osm_bright/{z}/{x}/{y}{r}.png' : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
+	const mapAttr = Capacitor.isNativePlatform() ? '<a href="https://stadiamaps.com/attribution/" target="_blank">Stadia Maps</a>' : '<a href="https://carto.com/" target="_blank">CARTO</a>';
+    L.tileLayer(mapsUrl, {
+		attribution: `&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, &copy; ${mapAttr}`,
         maxZoom: 19,
     }).addTo(mapInstance);
 
@@ -342,6 +343,9 @@ const REG_PUBLISH_INTERVAL = time(10, 'minutes').ms;
  * @param newPos
  */
 async function publishNewLocation(newPos: GeolocationPosition) {
+    // Android location publishing is handled by the native foreground service.
+    if (Capacitor.getPlatform() === 'android') return;
+
 	let shouldPublish = false;
 
 	const lastPublish = await StorageService.get<GeolocationPosition>(StorageKeys.DEVICE_LAST_PUBLISH);
@@ -506,7 +510,7 @@ defineExpose({
 
 .location-error {
     position: absolute;
-    bottom: 1rem;
+    top: 1rem;
     left: 50%;
     transform: translateX(-50%);
     background: rgba(0, 0, 0, 0.7);
@@ -515,6 +519,7 @@ defineExpose({
     border-radius: 4px;
     font-size: 0.85rem;
     pointer-events: none;
+	z-index: 9999;
 }
 
 .nav-bar {

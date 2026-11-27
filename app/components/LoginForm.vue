@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { ref } from 'vue';
 import 'leaflet/dist/leaflet.css';
 import Button from 'primevue/button';
 import { useUserStore } from '@/stores/user.store.js';
@@ -15,8 +15,17 @@ import { useToast } from './utils/Toast.vue';
 import { AuthService } from '@/services/authService.js';
 import { type ProfileDetails } from '@core/models/LocationShare.js';
 import ProfileEditor from './ProfileEditor.vue';
+import { Capacitor } from '@capacitor/core';
+import request from '@/services/request';
 
 const userStore = useUserStore();
+const isAndroidPhoneBrowser = !Capacitor.isNativePlatform()
+	&& /Android/i.test(navigator.userAgent)
+	&& /Mobile/i.test(navigator.userAgent);
+
+function downloadAndroidApp() {
+	window.location.assign(request.getUri({ url: '/downloads/android/latest' }));
+}
 
 const profile = ref<ProfileDetails>({});
 const pin = ref('');
@@ -91,6 +100,19 @@ async function signinWithPassword() {
 <template>
 	<div class="flex flex-column h-full align-items-center gap-3 text-center px-3" style="padding-top: calc(15vh - 5rem)">
 		<img src="../assets/logo-orbit.png" alt="beacon Logo" class="mb-2" style="width: 15em" />
+		<div v-if="isAndroidPhoneBrowser && view === 'default'" class="android-app-promo flex flex-column align-items-center gap-2 w-full">
+			<i class="pi pi-mobile android-app-icon" aria-hidden="true"></i>
+			<h2 class="m-0">Get the Beacon Android app</h2>
+			<p class="m-0">For the best experience on your Android phone, download the app before setting up your device.</p>
+			<Button
+				label="Download Android app"
+				icon="pi pi-download"
+				size="large"
+				class="w-full"
+				@click="downloadAndroidApp"
+			/>
+			<small>You can also continue in your browser below.</small>
+		</div>
 		<div v-if="userStore.isLoading" class="flex align-items-center">
 			<i class="pi pi-spin pi-spinner mr-2"></i>
 			Loading...
@@ -180,6 +202,25 @@ async function signinWithPassword() {
 </template>
 
 <style scoped lang="scss">
+.android-app-promo {
+	max-width: 32rem;
+	padding: 1.5rem;
+	border: 2px solid var(--p-primary-400);
+	border-radius: 1rem;
+	background: linear-gradient(135deg, var(--p-primary-50), #fff 75%);
+	box-shadow: 0 0.5rem 1.5rem #0002;
+
+	p {
+		max-width: 26rem;
+		line-height: 1.5;
+	}
+}
+
+.android-app-icon {
+	font-size: 2.5rem;
+	color: var(--p-primary-600);
+}
+
 .mnemonic-box {
 	background: #eeee;
 	border: 1px solid #ddd;

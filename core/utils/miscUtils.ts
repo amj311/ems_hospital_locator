@@ -152,3 +152,7 @@ export const parseNumber = (src: any) => {
 	const modified = String(src)?.split(/[^\d\.-]/g).join('');
 	return parseFloat(modified);
 }
+
+export function deviceLog(...args) {
+	console.log(`[BEACON] ${args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg).join('    ')}`)
+}

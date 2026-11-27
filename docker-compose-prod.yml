@@ -6,29 +6,17 @@ services:
     image: beacon-server
     pull_policy: never
     labels:
-      - "com.docker.compose.project=beacon-web"
+      - "com.docker.compose.project=beacon"
     container_name: beacon-server
     restart: on-failure:max=2
     ports:
-      - 3021:5000
+      - 3041:5000
+    volumes:
+      - ${ANDROID_DOWNLOADS_DIR:?Set by deploy.sh}:/app/downloads:ro
     depends_on:
       - db
-      - osrm
     links:
       - db
-      - osrm
-    environment:
-      - OSRM_BASE_URL=http://osrm:5000
-
-  # osrm:
-  #   image: osrm/osrm-backend
-  #   container_name: beacon-osrm
-  #   command: osrm-routed --algorithm mld /data/utah-latest.osrm --max-table-size 1000
-  #   restart: on-failure:max=2
-  #   labels:
-  #     - "com.docker.compose.project=beacon-web"
-  #   volumes:
-  #     - /app_data/beacon/osrm-data:/data
 
   db:
     image: beacon-db:latest
@@ -39,13 +27,13 @@ services:
       context: .
       dockerfile: ./Dockerfile.db
     labels:
-      - "com.docker.compose.project=beacon-web"
+      - "com.docker.compose.project=beacon"
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=password
       - POSTGRES_DB=beacon
     ports:
-      - 3022:5432
+      - 3042:5432
     volumes:
       - db-data:/var/lib/postgresql/data
 
@@ -58,7 +46,7 @@ services:
       context: .
       dockerfile: ./Dockerfile.backup
     labels:
-      - "com.docker.compose.project=beacon-web"
+      - "com.docker.compose.project=beacon"
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=password

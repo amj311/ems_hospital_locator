@@ -3,7 +3,6 @@ import { onBeforeUnmount, ref, watch } from 'vue';
 import 'leaflet/dist/leaflet.css';
 import DrawerModal from './utils/DrawerModal.vue';
 import Button from 'primevue/button';
-import type { Facility } from '@core/models/Facility';
 import Stepper from 'primevue/stepper';
 import StepPanels from 'primevue/steppanels';
 import StepPanel from 'primevue/steppanel';
@@ -19,17 +18,13 @@ import QrCode from './QrCode.vue';
 import { useShareStore } from '@/stores/shares.store.js';
 import { useUserStore } from '@/stores/user.store.js';
 import ProfileAvatar from './ProfileAvatar.vue';
-import { peek, wait } from '@core/utils/miscUtils.js';
+import { deviceLog, peek, wait } from '@core/utils/miscUtils.js';
 import ToggleSwitch from 'primevue/toggleswitch';
 import { pullLocation } from '@core/utils/geoUtils.js';
 
 const drawerModal = ref<InstanceType<typeof DrawerModal> | null>(null);
 
 defineExpose({ open });
-const emit = defineEmits<{
-    save: [facility: Facility];
-    delete: [facilityId: string];
-}>();
 
 const mode = ref<'approve' | 'request' | 'complete'>('approve');
 const step = ref(1);
@@ -58,6 +53,7 @@ function updateShareInit() {
 		fromExchangeKey: exchange_public_key || '',
 		profile: shareProfile.value ? useUserStore().profile : null,
 	};
+	deviceLog("SHARE INIT PAYLOAD", shareFromPayload.value)
 }
 updateShareInit();
 
@@ -125,11 +121,13 @@ function handleInitCodes(codes: Array<string>) {
 	for (const code of codes) {
 		try {
 			const payload = JSON.parse(code) as ShareInit;
+			deviceLog("QR payload", code);
 			if (payload.fromDeviceId
 				&& payload.fromDeviceId !== AuthService.deviceCredentials!.device_id
 				&& payload.fromExchangeKey
 				&& new Date(payload.expiresAt).getTime() > Date.now()
 			) {
+				deviceLog("code accepted")
 				moveToCreateRequestPage(payload);
 			}
 			else {

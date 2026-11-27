@@ -44,10 +44,10 @@ watch(() => share.value?.lastPos, (coords) => {
 	}
 }, { deep: true, immediate: true })
 
-async function getCity(share?: HydratedShare) {
-	if (share?.lastPos?.cityString) return share.lastPos.cityString;
-	if (!share?.lastPos) return 'Unknown';
-	const address = await reverseGeocode(share.lastPos);
+async function getCity(node?: TimelineNode | null) {
+	if (!node) return 'Unknown';
+	if (node.cityString) return node.cityString;
+	const address = await reverseGeocode(node);
 	return address?.format('town, state');
 }
 
@@ -132,7 +132,7 @@ function newFence() {
 					<Button v-else icon="pi pi-chevron-down" text severity="secondary" @click.stop="expanded = false" />
 				</div>
 				<div class="flex-row-center text-sm gap-2" v-if="share.lastPos">
-					<Async :load="() => getCity(share)" errorText="Unknown" />
+					<Async :load="() => getCity(share?.lastPos)" errorText="Unknown" />
 					{{ ago(share.lastPos.timestamp) }}
 				</div>
 			</div>
@@ -148,7 +148,7 @@ function newFence() {
 				</h3>
 
 				<div v-for="node of share.timeline.slice().reverse().slice(0,5)" class="flex justify-content-between">
-					<Async :load="() => getCity(share)" errorText="Unknown" />
+					<Async :load="() => getCity(node)" errorText="Unknown" />
 					<span>{{ ago(node.timestamp) }}</span>
 				</div>
 				<div v-if="share.timeline.length === 0">
