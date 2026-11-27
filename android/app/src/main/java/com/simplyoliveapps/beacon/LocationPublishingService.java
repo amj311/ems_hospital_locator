@@ -43,7 +43,7 @@ public class LocationPublishingService extends Service implements LocationListen
     private static final String LINKED_DEVICES_KEY = "beacon__linked_devices";
     private static final long MOVEMENT_TRIGGER_RADIUS_M = 50L;
     private static final long MIN_PUBLISH_INTERVAL_MS = 60_000L;
-    private static final long REGULAR_PUBLISH_INTERVAL_MS = 600_000L;
+    private static final long REGULAR_PUBLISH_INTERVAL_MS = 60_000L * 60;
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
